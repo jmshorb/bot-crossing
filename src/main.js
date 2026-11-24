@@ -326,6 +326,10 @@ const actions = {
     hud.toast(`Marked ${thread.title.slice(0, 40)} as viewed`)
   },
 
+  /** What the selected bot has out right now, by name — for the line on its card. */
+  dronesFor: (id) =>
+    settings.get('errandDrones') ? threads.filter((t) => t.parentId === id && !t.archived).map((t) => t.title) : [],
+
   /** Open the selected thread's title for editing — the card does the typing, `renameThread` the keeping. */
   startRename: () => {
     if (selectedId) hud.startRename()
@@ -554,11 +558,13 @@ function select(id, { fly = false } = {}) {
     selectedId = null
     rig.setFollow(null)
     colony.astronauts.setSelected(null)
+    colony.errandDrones.setHighlight(null)
     hud.setSelection(null, null)
     syncProject()
     return
   }
   colony.astronauts.setSelected(agent)
+  colony.errandDrones.setHighlight(agent.id)
   const thread = threads.find((t) => t.id === id) || agent.thread
   hud.setSelection(agent, thread)
   // It answers. One of six little phrases, from where it is standing, never twice in a row.
@@ -726,7 +732,7 @@ engine.canvas.addEventListener('pointermove', (e) => {
     return
   }
   const p = ndc(e)
-  const agent = colony.pick(p.x, p.y, p.aspect)
+  const agent = colony.pick(p.x, p.y, p.aspect) || colony.pickDroneParent(p.x, p.y, p.aspect)
   hoverId = agent?.id ?? null
   colony.astronauts.setHover(agent)
   // Pointing at a quiet plot is what makes its name appear.
@@ -1061,7 +1067,8 @@ engine.canvas.addEventListener('pointerup', (e) => {
   // long-pressing a plot and thinking better of it should not also open its sidebar.
   if (e.button !== 0 || !rig.wasClick || drag.lifted || drag.swallowClick) return
   const p = ndc(e)
-  const agent = colony.pick(p.x, p.y, p.aspect)
+  // A drone stands for the bot that sent it, so clicking one selects that bot.
+  const agent = colony.pick(p.x, p.y, p.aspect) || colony.pickDroneParent(p.x, p.y, p.aspect)
   if (agent) {
     select(agent.id, {})
     return

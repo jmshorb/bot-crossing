@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { crowdMaterials, crowdMesh, droneGeometry, phaseAttribute, wrapAngle } from '../world/fauna.js'
+import { bendPoint } from '../core/curve.js'
 
 /**
  * Sub-agents, drawn as drones working the air over the thread that sent them.
@@ -14,8 +15,9 @@ import { crowdMaterials, crowdMesh, droneGeometry, phaseAttribute, wrapAngle } f
  * appears, circles above it at its own radius and height while the errand runs — so three never
  * stack into one — and sinks back into the roof and shrinks away when the errand ends.
  *
- * One instanced mesh, sized once. Not pickable: an errand has nothing of its own to open, and
- * clicking its parent's bot is the way in.
+ * One instanced mesh, sized once. A drone has nothing of its own to open, so clicking one picks
+ * the bot that sent it; and while that bot is selected its drones glow, so a swarm reads as one
+ * thing even when its drones are spread round the building.
  */
 
 const CAPACITY = 64
@@ -28,9 +30,15 @@ const ROTOR_RATE = 42
 /** Seconds to rise in or sink out; the scale follows the same clock. */
 const GROW = 0.9
 const UNTINTED = 0xf2efe8
+/** A selected bot's drones: pushed past 1.0 so the bloom pass catches them, and a touch bigger. */
+const LIT_GAIN = 1.9
+const LIT_SCALE = 1.15
+/** World radius a click has to land within, around a drone's centre. */
+const PICK_RADIUS = 0.75
 
 const _dummy = new THREE.Object3D()
 const _color = new THREE.Color()
+const _v = new THREE.Vector3()
 
 function hash(s) {
   let h = 2166136261
@@ -66,6 +74,38 @@ export class ErrandDrones {
 
     /** id → drone. Kept across polls so a drone already circling never jumps. */
     this.drones = new Map()
+    /** The parent whose drones are lit — the selected bot's thread id, or null. */
+    this.highlight = null
+  }
+
+  setHighlight(parentId) {
+    this.highlight = parentId || null
+  }
+
+  /**
+   * The parent thread id of the drone under the cursor, or null. Each drone's centre is bent
+   * through the world curve the way the shader draws it, then projected; a hit is anywhere within
+   * the drone's own on-screen radius, so a near drone is as easy to click as a far one is fair.
+   * Nearest to the camera wins when two overlap.
+   */
+  pick(camera, ndcX, ndcY, aspect) {
+    const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+    let best = null
+    let bestDepth = Infinity
+    for (const d of this.drones.values()) {
+      if (d.leaving || d.grow < 0.5) continue
+      bendPoint(_v.set(d.x, d.y, d.z)).applyMatrix4(camera.matrixWorldInverse)
+      const depth = -_v.z
+      if (depth <= camera.near) continue
+      const r = (PICK_RADIUS * SCALE * d.grow) / (depth * halfFov)
+      _v.applyMatrix4(camera.projectionMatrix)
+      const dx = (ndcX - _v.x) * aspect
+      const dy = ndcY - _v.y
+      if (dx * dx + dy * dy > r * r || depth >= bestDepth) continue
+      best = d.parentId
+      bestDepth = depth
+    }
+    return best
   }
 
   /**
@@ -102,6 +142,7 @@ export class ErrandDrones {
         this.drones.set(e.id, d)
       }
       d.leaving = false
+      d.parentId = e.parentId
       d.anchor = e.anchor.clone()
       d.lane = lane
       d.color = e.color ?? UNTINTED
@@ -151,10 +192,13 @@ export class ErrandDrones {
       _dummy.rotation.set(0, d.heading, 0)
       _dummy.rotateX(d.pitch)
       _dummy.rotateZ(d.roll)
-      _dummy.scale.setScalar(SCALE * Math.max(0.001, d.grow))
+      const lit = this.highlight !== null && d.parentId === this.highlight
+      _dummy.scale.setScalar(SCALE * (lit ? LIT_SCALE : 1) * Math.max(0.001, d.grow))
       _dummy.updateMatrix()
       this.mesh.setMatrixAt(n, _dummy.matrix)
-      this.mesh.setColorAt(n, _color.setHex(d.color))
+      _color.setHex(d.color)
+      if (lit) _color.multiplyScalar(LIT_GAIN)
+      this.mesh.setColorAt(n, _color)
       this.rotor.array[n] = d.angle
       n++
     }

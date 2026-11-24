@@ -19,7 +19,8 @@
 >   Allow/Deny no longer looks busy.
 > - **Sub-agents fly as drones.** A Claude Code subagent or a worker in an Antigravity swarm
 >   circles its parent's building as a drone in its tool's colour, instead of walking the zone
->   as a bot of its own. Switch back in Settings → View.
+>   as a bot of its own. Click a bot and its drones light up, with their names on its card;
+>   click a drone to select the bot that sent it. Switch back in Settings → View.
 >
 > All but the Finder sync and the drones have been offered upstream as pull requests
 > ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),

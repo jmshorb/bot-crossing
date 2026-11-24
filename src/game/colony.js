@@ -1329,6 +1329,16 @@ export class Colony {
     return this.astronauts.pick(this.camera, ndcX, ndcY, aspect)
   }
 
+  /**
+   * The bot whose drone is under the cursor, or null. Kept apart from `pick` on purpose: a click
+   * or a hover on a drone means its parent, but a press-and-hold on one must not lift the parent
+   * off the ground from across the zone.
+   */
+  pickDroneParent(ndcX, ndcY, aspect) {
+    const parentId = this.errandDrones.pick(this.camera, ndcX, ndcY, aspect)
+    return parentId ? this.astronauts.byId.get(parentId) || null : null
+  }
+
   agentFor(id) {
     return this.astronauts.byId.get(id)
   }

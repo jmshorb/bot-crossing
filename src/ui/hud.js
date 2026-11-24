@@ -963,6 +963,13 @@ export class Hud {
     if (thread.gitBranch) bits.push(`<span class="tag">${escapeHtml(thread.gitBranch)}</span>`)
     if (thread.model) bits.push(`<span class="tag">${escapeHtml(shortModel(thread.model))}</span>`)
     bits.push(`<span>${ago(thread.lastActivityAt)}</span>`)
+    // Its swarm, by name, on a line of its own: the drones may be round the far side of the
+    // building, and the names say what each one is for.
+    const drones = this.actions.dronesFor?.(thread.id) || []
+    if (drones.length) {
+      const names = drones.map((n) => escapeHtml(n)).join(', ')
+      bits.push(`<span class="swarm">${drones.length} drone${drones.length === 1 ? '' : 's'}: ${names}</span>`)
+    }
     meta.innerHTML = bits.join('')
 
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
