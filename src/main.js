@@ -621,7 +621,7 @@ function select(id, { fly = false } = {}) {
     return
   }
   colony.astronauts.setSelected(agent)
-  colony.errandDrones.setHighlight(agent.id)
+  colony.errandDrones.setHighlight(agent.id, agent)
   const thread = threads.find((t) => t.id === id) || agent.thread
   hud.setSelection(agent, thread)
   // It answers. One of six little phrases, from where it is standing, never twice in a row.

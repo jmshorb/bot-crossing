@@ -30,9 +30,18 @@ const ROTOR_RATE = 42
 /** Seconds to rise in or sink out; the scale follows the same clock. */
 const GROW = 0.9
 const UNTINTED = 0xf2efe8
-/** A selected bot's drones: pushed past 1.0 so the bloom pass catches them, and a touch bigger. */
-const LIT_GAIN = 1.9
-const LIT_SCALE = 1.15
+/**
+ * A selected bot's drones. Pushed well past 1.0 and pulsing, because the bloom pass only catches
+ * colour a long way over 1 and a blue drone at 1.9x read as barely lighter; bigger; and gathered
+ * round the bot itself, just over its head. Round the building was tried first, and the bot's
+ * card — placed beside the bot — sat right over the building and hid them; the bot is the one
+ * spot the card is laid out to keep clear.
+ */
+const LIT_GAIN = [2.6, 4.2] // the pulse's low and high
+const LIT_PULSE = 3.2 // radians per second
+const LIT_SCALE = 1.35
+const LIT_HEIGHT = 2.1 // over the bot's feet
+const LIT_RADIUS = 1.25
 /** World radius a click has to land within, around a drone's centre. */
 const PICK_RADIUS = 0.75
 
@@ -78,8 +87,10 @@ export class ErrandDrones {
     this.highlight = null
   }
 
-  setHighlight(parentId) {
+  /** Light up `parentId`'s drones and gather them round `follow` (its bot, with a `pos`). */
+  setHighlight(parentId, follow = null) {
     this.highlight = parentId || null
+    this.follow = parentId ? follow : null
   }
 
   /**
@@ -152,6 +163,8 @@ export class ErrandDrones {
 
   update(dt, motion = 1) {
     let n = 0
+    this._t = (this._t || 0) + dt
+    const pulse = 0.5 + 0.5 * Math.sin(this._t * LIT_PULSE)
     for (const [id, d] of this.drones) {
       d.grow = THREE.MathUtils.clamp(d.grow + (d.leaving ? -dt : dt) / GROW, 0, 1)
       if (d.leaving && d.grow <= 0) {
@@ -162,11 +175,21 @@ export class ErrandDrones {
 
       // A circle of its own round the parent: lanes step the radius out and the height up.
       d.orbit += ORBIT_SPEED * motion * dt * (d.lane % 2 ? -1 : 1)
-      const r = ORBIT_RADIUS + d.lane * 0.9
+      // Eased, so a drone glides over to its bot when the bot is picked and back when let go.
+      const litNow = this.highlight !== null && d.parentId === this.highlight && this.follow?.pos
+      d.lit = THREE.MathUtils.damp(d.lit || 0, litNow ? 1 : 0, 4, dt)
       const up = d.leaving || d.grow < 1 ? d.grow : 1
-      const tx = d.anchor.x + Math.cos(d.orbit) * r * up
-      const tz = d.anchor.z + Math.sin(d.orbit) * r * up
-      const ty = d.anchor.y + 0.5 + (ORBIT_HEIGHT + d.lane * 0.55 - 0.5) * up + Math.sin(d.orbit * 3 + d.lane) * 0.15
+      // The centre, height and radius of the circle slide from the building's to the bot's.
+      const f = this.follow?.pos
+      const k = f ? d.lit : 0
+      const cx = d.anchor.x + (f ? (f.x - d.anchor.x) * k : 0)
+      const cz = d.anchor.z + (f ? (f.z - d.anchor.z) * k : 0)
+      const r = (ORBIT_RADIUS + d.lane * 0.9) * (1 - k) + (LIT_RADIUS + d.lane * 0.45) * k
+      const tx = cx + Math.cos(d.orbit) * r * up
+      const tz = cz + Math.sin(d.orbit) * r * up
+      const high = d.anchor.y + 0.5 + (ORBIT_HEIGHT + d.lane * 0.55 - 0.5) * up
+      const low = (f ? f.y : d.anchor.y) + LIT_HEIGHT + d.lane * 0.35
+      const ty = high * (1 - k) + low * k + Math.sin(d.orbit * 3 + d.lane) * 0.15
 
       const ax = ((tx - d.x) * 2.2 - d.vx) * Math.min(1, 3 * dt)
       const az = ((tz - d.z) * 2.2 - d.vz) * Math.min(1, 3 * dt)
@@ -192,12 +215,11 @@ export class ErrandDrones {
       _dummy.rotation.set(0, d.heading, 0)
       _dummy.rotateX(d.pitch)
       _dummy.rotateZ(d.roll)
-      const lit = this.highlight !== null && d.parentId === this.highlight
-      _dummy.scale.setScalar(SCALE * (lit ? LIT_SCALE : 1) * Math.max(0.001, d.grow))
+      _dummy.scale.setScalar(SCALE * (1 + (LIT_SCALE - 1) * d.lit) * Math.max(0.001, d.grow))
       _dummy.updateMatrix()
       this.mesh.setMatrixAt(n, _dummy.matrix)
       _color.setHex(d.color)
-      if (lit) _color.multiplyScalar(LIT_GAIN)
+      if (d.lit > 0.01) _color.multiplyScalar(1 + (LIT_GAIN[0] + (LIT_GAIN[1] - LIT_GAIN[0]) * pulse - 1) * d.lit)
       this.mesh.setColorAt(n, _color)
       this.rotor.array[n] = d.angle
       n++
