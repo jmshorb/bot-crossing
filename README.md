@@ -15,8 +15,8 @@
 >   in the right zone, with the app's own titles.
 > - **Bots tinted by AI tool.** Orange for Claude Code, blue for Antigravity, green for Codex, each
 >   changeable in Settings → View.
-> - **Permission prompts show as `?`.** A Claude Code thread waiting on Allow/Deny no longer
->   looks busy.
+> - **Permission prompts show as `?`.** A Claude Code or Antigravity thread waiting on
+>   Allow/Deny no longer looks busy.
 >
 > All but the Finder sync have been offered upstream as pull requests
 > ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),
