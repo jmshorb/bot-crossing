@@ -58,6 +58,12 @@ const PALMS = [
   [(Math.PI / 3) * 5, 5.8, 2.05, 0.22],
 ]
 
+/** The thatch pyramid: its corner radius and its rise, from the eaves to the peak. */
+const THATCH_R = 2.5
+const THATCH_H = 1.35
+/** How much longer the roof runs along the bar than across it. */
+const THATCH_STRETCH = 1.35
+
 /** How far either side of the bar's middle the torches stand: half a unit clear of the eaves. */
 const TORCH_Z = 3.1
 
@@ -220,8 +226,7 @@ export class Lounge {
       this._add(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 12), wood, bx - 0.85, 0.66, pz)
       this._add(new THREE.CylinderGeometry(0.04, 0.05, 0.64, 8), wood, bx - 0.85, 0.32, pz)
     }
-    const sign = this._add(new THREE.PlaneGeometry(1.7, 0.5), this._mat({ map: signTexture(), roughness: 0.8 }), bx - 0.37, 1.62, 0, -Math.PI / 2, false)
-    sign.rotation.y = -Math.PI / 2
+    this._buildSign(bx + 0.05, 2.2)
     // Two torches, one off each end of the bar, which glow after dark. Out past the eaves on
     // purpose: the thatch reaches about 2.5 either side of the counter, and a flame under straw
     // is a fire waiting to happen. Tall enough to see over the counter from the pool.
@@ -319,13 +324,44 @@ export class Lounge {
       alphaTest: 0.5,
       color: 0xffffff,
     })
-    const r = 2.5
-    const h = 1.35
-    const cone = this._add(new THREE.ConeGeometry(r, h, 4, 1, true), straw, x, y + h / 2, 0, Math.PI / 4)
-    cone.scale.set(1, 1, 1.35)
+    const r = THATCH_R
+    const h = THATCH_H
+    // Turned a quarter in the geometry, then stretched along the bar. The other way round — turn
+    // on the mesh, stretch on the mesh — stretched it along a diagonal, a skewed rhombus whose
+    // faces lined up with nothing.
+    const coneGeo = new THREE.ConeGeometry(r, h, 4, 1, true)
+    coneGeo.rotateY(Math.PI / 4)
+    const cone = this._add(coneGeo, straw, x, y + h / 2, 0)
+    cone.scale.set(1, 1, THATCH_STRETCH)
     // The fringe: a short, slightly flared skirt just under the eaves.
-    const skirt = this._add(new THREE.CylinderGeometry(r * 0.99, r * 1.07, 0.38, 4, 1, true), fringe, x, y - 0.14, 0, Math.PI / 4)
-    skirt.scale.set(1, 1, 1.35)
+    const skirtGeo = new THREE.CylinderGeometry(r * 0.99, r * 1.07, 0.38, 4, 1, true)
+    skirtGeo.rotateY(Math.PI / 4)
+    const skirt = this._add(skirtGeo, fringe, x, y - 0.14, 0)
+    skirt.scale.set(1, 1, THATCH_STRETCH)
+  }
+
+  /**
+   * The TIKI BAR sign: an upright board standing on the front edge of the roof, facing the pool
+   * and leaning back a little. It hung under the eaves first, where only a camera at deck level
+   * saw it, then lay flat on the thatch, where the high camera saw it so foreshortened it read
+   * as a smudge. Standing up on the eave it faces the guests, the way a bar's sign would, and the
+   * lean is enough for the usual view from above. `x`/`y` are the roof's centre and eaves.
+   */
+  _buildSign(x, y) {
+    // The roof's front edge: its corner radius times cos 45°, since the corners are diagonal.
+    const front = x - THATCH_R * Math.SQRT1_2
+    const W = 2.3
+    const H = 0.7
+    const LEAN = 0.32 // radians back from upright
+    const mat = this._mat({ map: signTexture(), roughness: 0.8, side: THREE.DoubleSide })
+    const sign = this._add(new THREE.BoxGeometry(W, H, 0.06), mat, 0, 0, 0, 0, false)
+    // Facing the pool (-X), leaning back toward the peak.
+    sign.rotation.order = 'YXZ'
+    sign.rotation.y = -Math.PI / 2
+    sign.rotation.x = -LEAN
+    // Its foot on the eave, just in front of the straw, so the board rises clear above it.
+    sign.position.set(front - 0.04 + Math.sin(LEAN) * H * 0.5, y + 0.06 + Math.cos(LEAN) * H * 0.5, 0)
+    sign.castShadow = true
   }
 
   /**
