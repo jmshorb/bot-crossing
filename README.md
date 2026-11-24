@@ -17,8 +17,11 @@
 >   changeable in Settings → View.
 > - **Permission prompts show as `?`.** A Claude Code or Antigravity thread waiting on
 >   Allow/Deny no longer looks busy.
+> - **Sub-agents fly as drones.** A Claude Code subagent or a worker in an Antigravity swarm
+>   circles its parent's building as a drone in its tool's colour, instead of walking the zone
+>   as a bot of its own. Switch back in Settings → View.
 >
-> All but the Finder sync have been offered upstream as pull requests
+> All but the Finder sync and the drones have been offered upstream as pull requests
 > ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),
 > [#111](https://github.com/Station-Sciences/bot-crossing/pull/111),
 > [#112](https://github.com/Station-Sciences/bot-crossing/pull/112),
