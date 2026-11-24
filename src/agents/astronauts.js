@@ -628,6 +628,9 @@ export class Astronauts {
       // On a lounger at the pool: the way it lies, and the table its drink stands on.
       seatYaw: entry.seatYaw ?? null,
       drinkAt: entry.drinkAt ? entry.drinkAt.clone() : null,
+      // No lounger free: it wanders the deck instead, held to wherever `keepIn` allows.
+      mingle: Boolean(entry.mingle),
+      keepIn: entry.keepIn || null,
       // The thing being worked on, and where round it this astronaut is standing to do it.
       anchor: entry.anchor ? entry.anchor.clone() : null,
       workSpot: new THREE.Vector3(),
@@ -719,6 +722,8 @@ export class Astronauts {
     agent.thread = entry.thread
     agent.seatYaw = entry.seatYaw ?? null
     agent.drinkAt = entry.drinkAt ? entry.drinkAt.clone() : null
+    agent.mingle = Boolean(entry.mingle)
+    agent.keepIn = entry.keepIn || null
     if (entry.site) {
       // Measured against the site the roster last handed over, not the one being stood at:
       // an astronaut that gave up on an unreachable site and adopted the ground it reached
@@ -986,8 +991,9 @@ export class Astronauts {
       }
 
       case 'at-site': {
-        if (agent.status === 'idle') {
-          // Idlers potter around their plot, and `_drift` owns their velocity outright.
+        if (agent.status === 'idle' || (agent.status === 'break' && agent.mingle)) {
+          // Idlers potter around their plot, and `_drift` owns their velocity outright. So does
+          // a guest with no lounger, round the pool deck.
           this._drift(agent, dt, elapsed)
         } else if (agent.status === 'working' && agent.anchor) {
           this._workRound(agent, dt, elapsed)
@@ -1244,6 +1250,7 @@ export class Astronauts {
         const wx = agent.site.x + Math.cos(a) * r
         const wz = agent.site.z + Math.sin(a) * r
         if (this.nav?.isBlocked(wx, wz) || this.nav?.insideKeep(wx, wz)) continue
+        if (agent.keepIn && !agent.keepIn(wx, wz)) continue
         if (this.nav && !this.nav.clearWalk(agent.pos.x, agent.pos.z, wx, wz)) continue
         if (this._crowded(wx, wz, agent)) continue
         agent.wander.set(wx, 0, wz)
@@ -1505,8 +1512,14 @@ export class Astronauts {
           break
         // Sitting down is a one-shot that hands over to the loop when it finishes, so an
         // agent that has just nodded off lowers itself rather than snapping into a sit.
-        case 'sleeping':
         case 'break':
+          // Standing about with nowhere to lie down: the idle, between strolls.
+          if (agent.mingle) {
+            key = 'idle'
+            break
+          }
+        // falls through
+        case 'sleeping':
           key = agent.clipKey === 'sit' ? 'sit' : 'sitDown'
           break
         default:

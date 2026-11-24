@@ -278,6 +278,34 @@ export class Lounge {
     return this.seats.length
   }
 
+  /**
+   * Where a guest stands when every lounger is taken: open deck clear of the loungers and the
+   * bar, mostly at the pool's far end, cycling round for as many as there are. A starting point
+   * only — the guest wanders the deck from there, held to it by `onDeck`.
+   */
+  mingleSpot(k) {
+    const spots = [
+      [-4.5, 0], [-4.5, 2.4], [-4.5, -2.4], [-3.4, 1.2], [-3.4, -1.2],
+      [3.4, 3.5], [3.4, -3.5], [-1.7, 3.8], [1.7, -3.8], [-1.7, -3.8], [1.7, 3.8],
+    ]
+    const [x, z] = spots[k % spots.length]
+    return new THREE.Vector3(x, 0, z).applyMatrix4(this.group.matrixWorld)
+  }
+
+  /** Whether a point is somewhere a wandering guest may walk: on the deck, not in the pool. */
+  onDeck(x, z) {
+    if (!this.contains(x, z, -0.45)) return false
+    const dx = x - this.center.x
+    const dz = z - this.center.z
+    const c = Math.cos(-this.angle)
+    const s = Math.sin(-this.angle)
+    const lx = dx * c - dz * s
+    const lz = dx * s + dz * c
+    // Under a dome the plinth ring counts as floor, but the deck's own edges are the limit.
+    if (Math.abs(lx) > LOUNGE.deckW / 2 - 0.45 || Math.abs(lz) > LOUNGE.deckD / 2 - 0.45) return false
+    return !(Math.abs(lx) < LOUNGE.poolW / 2 + 0.6 && Math.abs(lz) < LOUNGE.poolD / 2 + 0.6)
+  }
+
   /** The bar's world position, for picking and for flying the camera to. */
   barWorld(out = new THREE.Vector3()) {
     return out.copy(this.barLocal).applyMatrix4(this.group.matrixWorld)

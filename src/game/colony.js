@@ -749,15 +749,21 @@ export class Colony {
     this.activePlots = active
     this._rebuildNavigation()
     const onBreak = new Set(roster.filter((m) => m.status === 'break').map((m) => m.id))
+    let mingling = 0
     for (const member of roster) {
       const entry = this.buildings.get(member.id)
       const plot = this.plots.get(entry.plot)
       if (member.status === 'break') {
         // A lounger at the pool if one is free, else a patch of grass by its own zone.
+        // A lounger at the pool if one is free; with every lounger taken, the deck round the
+        // pool to wander; with no lounge at all, a patch of grass by its own zone.
         const seat = this._loungeSeat(member.id, onBreak)
-        member.site = seat ? seat.pos : this._breakSite(plot, member.id)
+        const lounge = this.lounge
+        member.site = seat ? seat.pos : lounge ? lounge.mingleSpot(mingling++) : this._breakSite(plot, member.id)
         member.seatYaw = seat ? seat.yaw : null
         member.drinkAt = seat ? seat.table : null
+        member.mingle = !seat && Boolean(lounge)
+        member.keepIn = member.mingle ? (x, z) => lounge.onDeck(x, z) : null
       } else member.site = this._workSite(plot, entry, entry.slot)
     }
     if (!roster.some((m) => m.status === 'break')) this._loungeSeat(null, onBreak)
