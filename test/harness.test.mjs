@@ -721,6 +721,22 @@ test("a running Antigravity swarm's workers are errands of the conversation that
   await fsp.rm(home, { recursive: true, force: true })
 })
 
+test('an Antigravity orchestrator that has handed the work to a sub-agent is still working', async () => {
+  const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'remediate the library' }])
+  const now = new Date().toISOString().replace('T', ' ')
+  const kid = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001'
+  // As the app left a real one: the parent IDLE while its browser worker runs.
+  await fakeAntigravitySummaries(home, [
+    { id: SESSION_ID, title: 'Library Remediator', status: 'CASCADE_RUN_STATUS_IDLE', updated: now },
+    { id: kid, status: 'CASCADE_RUN_STATUS_RUNNING', parent: SESSION_ID, agent: 'browser', updated: now },
+  ])
+  const h = await antigravityWith(home)
+  const [t] = await h.scanThreads()
+  assert.equal(t.running, true)
+  assert.deepEqual(t.subagents.map((s) => s.task), ['browser'])
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
 test('an Antigravity command left running in the background is work, and flies as a drone', async () => {
   const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'run the bulk crawl' }])
   // The model has ended its turn — IDLE — but the app marks it not fully idle.
