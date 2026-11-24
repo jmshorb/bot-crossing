@@ -1165,6 +1165,9 @@ engine.canvas.addEventListener('pointerup', (e) => {
   // long-pressing a plot and thinking better of it should not also open its sidebar.
   if (e.button !== 0 || !rig.wasClick || drag.lifted || drag.swallowClick) return
   const p = ndc(e)
+  // The tiki bar's guest list closes on a click anywhere on the map but the bar, the way a bot's
+  // card closes on a click off it. A click on a bot closes it and goes on to pick the bot.
+  if (hud.tikiOpen && !colony.pickBar(p.x, p.y, p.aspect)) hud.toggleTiki(false)
   // A drone stands for the bot that sent it, so clicking one selects that bot.
   const agent = colony.pick(p.x, p.y, p.aspect) || colony.pickDroneParent(p.x, p.y, p.aspect)
   if (agent) {
