@@ -347,9 +347,11 @@ function errandsOf(index, now) {
   const byParent = new Map()
   for (const [id, row] of index) {
     if (!row.child || !row.parent || row.killed || !RUNNING_STATUS.test(row.status)) continue
-    if (row.updatedAt && now - row.updatedAt > ACTIVE_WINDOW_MS) continue
+    // A worker quiet past the activity window is kept but marked stale: it is no drone, but it
+    // may be sitting on an approval, and a wait like that lasts as long as you are away.
+    const stale = Boolean(row.updatedAt && now - row.updatedAt > ACTIVE_WINDOW_MS)
     if (!byParent.has(row.parent)) byParent.set(row.parent, [])
-    byParent.get(row.parent).push({ id, task: row.agent || row.title || 'Sub-agent', lastActivityAt: row.updatedAt || now })
+    byParent.get(row.parent).push({ id, task: row.agent || row.title || 'Sub-agent', lastActivityAt: row.updatedAt || now, stale })
   }
   return byParent
 }
@@ -377,7 +379,14 @@ async function scanThreads() {
       // or idle with something it started still going.
       const live = !summary?.killed && (RUNNING_STATUS.test(summary?.status || '') || summary?.busy)
       const steps = live ? await stepState(home.dir, entry.id) : { waiting: false, background: [] }
-      const blocked = steps.waiting && RUNNING_STATUS.test(summary?.status || '')
+      // A swarm stops on you when any of its workers does: the orchestrator sits IDLE waiting on
+      // the worker, and the worker sits on Allow/Deny, so the Allow is the parent bot's question.
+      const workers = errands.get(entry.id) || []
+      let workerWaiting = false
+      for (const w of workers) {
+        if ((await stepState(home.dir, w.id)).waiting) workerWaiting = true
+      }
+      const blocked = (steps.waiting && RUNNING_STATUS.test(summary?.status || '')) || workerWaiting
       const thread = await threadOf(entry, home, where, summary, now, blocked)
       // A command left running in the background is work in progress, whatever the model's own
       // status says, and each one flies as a drone over the bot that started it.
@@ -385,7 +394,7 @@ async function scanThreads() {
       // An orchestrator hands the work to its sub-agents and marks itself IDLE while they run,
       // keeping only `not_fully_idle` set. Its workers running, or that flag on a conversation
       // touched recently, is the thread still at work, not one waiting for you.
-      const kids = errands.get(entry.id) || []
+      const kids = workers.filter((w) => !w.stale).map(({ stale, ...w }) => w)
       const recent = now - thread.lastActivityAt < ACTIVE_WINDOW_MS
       if (!blocked && !summary?.killed && recent && (kids.length || summary?.busy)) thread.running = true
       const out = [

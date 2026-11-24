@@ -737,6 +737,28 @@ test('an Antigravity orchestrator that has handed the work to a sub-agent is sti
   await fsp.rm(home, { recursive: true, force: true })
 })
 
+test('an Antigravity swarm whose worker sits on an approval wants you, however long it has waited', async () => {
+  const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'check the pages' }])
+  const old = new Date(Date.now() - 45 * 60e3).toISOString().replace('T', ' ')
+  const kid = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001'
+  // As the app left a real one: the orchestrator IDLE, its browser worker RUNNING on an Allow.
+  await fakeAntigravitySummaries(home, [
+    { id: SESSION_ID, title: 'Library Remediator', status: 'CASCADE_RUN_STATUS_IDLE', updated: old },
+    { id: kid, status: 'CASCADE_RUN_STATUS_RUNNING', parent: SESSION_ID, agent: 'browser', updated: old },
+  ])
+  const { DatabaseSync } = await import('node:sqlite')
+  await fsp.mkdir(path.join(home, 'conversations'), { recursive: true })
+  const db = new DatabaseSync(path.join(home, 'conversations', `${kid}.db`))
+  db.exec('CREATE TABLE steps (idx integer PRIMARY KEY, step_type integer, status integer)')
+  for (const [idx, status] of [[0, 3], [1, 3], [2, 9]]) db.prepare('INSERT INTO steps VALUES (?, 132, ?)').run(idx, status)
+  db.close()
+  const h = await antigravityWith(home)
+  const [t] = await h.scanThreads()
+  assert.equal(t.running, false)
+  assert.equal(t.unread, true)
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
 test('an Antigravity command left running in the background is work, and flies as a drone', async () => {
   const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'run the bulk crawl' }])
   // The model has ended its turn — IDLE — but the app marks it not fully idle.
