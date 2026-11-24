@@ -22,7 +22,10 @@ import {
   openThread,
   newSession,
   revealFolder,
+  fetchFinderColors,
+  setFinderColor,
 } from './game/api.js'
+import { FINDER_SWATCHES, nearestFinderColor, reconcileZoneColor } from './game/zone-colors.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { ACTIVE, JumpRun, NEEDS_YOU, busiestOrder, crewOrder, inScope, needsYouOrder, nextInRing } from './game/jumps.js'
@@ -64,7 +67,7 @@ engine.setPlanetGrade(PLANETS[settings.get('planet')]?.grade)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, names: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, names: {}, zoneColors: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -371,6 +374,34 @@ const actions = {
     hud.toast(`Showing ${name} again`)
   },
 
+  /**
+   * Recolour a zone, or hand it back to the palette with `null`. On macOS the folder's Finder
+   * tag follows — the nearest of Finder's seven, since that is all Finder has.
+   */
+  setZoneColor: async (name, color) => {
+    if (!name) return
+    const zoneColors = { ...(state.zoneColors || {}) }
+    const folder = pathForProject(name)
+    const tag = color === null ? 0 : nearestFinderColor(color)
+    // Synced as `tag` up front, so a poll landing mid-write reads the old tag as "Finder
+    // changed" only if the write then fails — `finderPending` keeps it from looking at all.
+    if (color === null) delete zoneColors[name]
+    else zoneColors[name] = { color, finder: finderSyncOn() && folder ? tag : 0 }
+    state.zoneColors = zoneColors
+    queueSave()
+    applyZoneColors()
+    if (!finderSyncOn() || !folder) return
+    finderPending.add(name)
+    try {
+      await setFinderColor(folder, tag)
+      hud.toast(tag ? `${name} is ${FINDER_SWATCHES[tag].name.toLowerCase()} in Finder too` : `Cleared ${name}’s Finder colour`)
+    } catch (err) {
+      hud.toast(err.message || 'Could not tag the folder in Finder', 'err')
+    } finally {
+      finderPending.delete(name)
+    }
+  },
+
   copyProjectPath: async () => {
     const folder = selectedProject && pathForProject(selectedProject)
     if (!folder) return
@@ -611,7 +642,7 @@ function pathForProject(name) {
 
 /** Push the open zone's current contents at the sidebar. Closes it if the zone is gone. */
 function syncProject() {
-  const hidden = hiddenCatalog(state.hiddenProjects || [], threads)
+  const hidden = hiddenCatalog(state.hiddenProjects || [], threads).map((p) => ({ ...p, accent: colony.accentFor(p.name) }))
   // Folded-away repos are listed alongside the ones you hid by hand. Same principle: nothing
   // leaves the map without somewhere on screen saying where it went.
   const folded = hiddenCatalog([...(colony.dormantProjects || [])], threads)
@@ -1312,11 +1343,68 @@ async function poll() {
     const res = await fetchThreads()
     applyThreads(res.threads || [])
     hud.removeBoot()
+    syncFinderColors()
   } catch (err) {
     hud.toast(err.message || 'Could not reach the thread scanner', 'err')
     hud.removeBoot()
   } finally {
     polling = false
+  }
+}
+
+// ── zone colours ──────────────────────────────────────────────────────────────────────
+
+/** Zones with a Finder write in flight; the reconcile leaves them alone until it lands. */
+const finderPending = new Set()
+/** Off on anything but macOS, and once the server has said so; on there unless you turn it off. */
+let finderSupported = /Mac/.test(navigator.platform)
+const finderSyncOn = () => finderSupported && settings.get('finderTags')
+
+function applyZoneColors() {
+  const colors = Object.fromEntries(Object.entries(state.zoneColors || {}).map(([name, c]) => [name, c.color]))
+  // Not before the first roster: an empty apply would count as the colony's first look at the
+  // world, and the real one after it would chime for every thread already waiting.
+  if (colony.setZoneColors(colors) && threads.length) applyThreads(threads)
+}
+
+/**
+ * Pull Finder's colours in. One request per poll for every zone's folder, and only zones on
+ * the map: a hidden repo keeps whatever it last had until it comes back.
+ */
+let finderSyncing = false
+async function syncFinderColors() {
+  if (!finderSyncOn() || finderSyncing) return
+  const folders = new Map()
+  for (const plot of colony.plotOrder) {
+    const dir = pathForProject(plot.name)
+    if (dir) folders.set(plot.name, dir)
+  }
+  if (!folders.size) return
+  finderSyncing = true
+  try {
+    const res = await fetchFinderColors([...new Set(folders.values())])
+    if (!res.supported) {
+      finderSupported = false
+      return
+    }
+    const zoneColors = { ...(state.zoneColors || {}) }
+    let changed = false
+    for (const [name, dir] of folders) {
+      if (finderPending.has(name) || !(dir in res.colors)) continue
+      const next = reconcileZoneColor(zoneColors[name], res.colors[dir])
+      if (next === (zoneColors[name] || null)) continue
+      if (next) zoneColors[name] = next
+      else delete zoneColors[name]
+      changed = true
+    }
+    if (!changed) return
+    state.zoneColors = zoneColors
+    queueSave()
+    applyZoneColors()
+  } catch {
+    /* Finder is a nicety; the map keeps the colours it has */
+  } finally {
+    finderSyncing = false
   }
 }
 
@@ -1346,6 +1434,7 @@ async function boot() {
         state = s
         // Before the first roster: zones come back to the ground they were on last time.
         colony.restoreLayout(state.plots)
+        applyZoneColors()
         // And the settings, but only for a browser that has none of its own — an explicit
         // choice made here always outranks the file.
         if (!hasStoredSettings() && state.settings) settings.applyAll(state.settings)
@@ -1401,6 +1490,7 @@ settings.onChange((changed, scope) => {
   // rebuilt from the list rather than merely re-rendered.
   if (changed.has('hideDormant')) applyThreads(threads)
   if (changed.has('maxAgents')) applyThreads(threads)
+  if (changed.has('finderTags')) syncFinderColors()
 })
 
 // ── frame ─────────────────────────────────────────────────────────────────────────────

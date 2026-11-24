@@ -7,6 +7,7 @@ import { schemeHasHandler, schemeOf } from './lib/xdg.mjs'
 import { openInTerminal } from './lib/terminal.mjs'
 import { focusWindowOfPid } from './lib/windows.mjs'
 import { threadsForPage } from './lib/page-threads.mjs'
+import { finderTagsSupported, readFinderColor, writeFinderColor } from './lib/finder-tags.mjs'
 import {
   defaultHarness,
   harnessStatus,
@@ -61,6 +62,7 @@ const emptyState = () => ({
   hiddenProjects: [],
   viewedAt: {},
   names: {},
+  zoneColors: {},
   settings: null,
   updatedAt: 0,
 })
@@ -73,6 +75,18 @@ const asNames = (v) =>
     Object.entries(asObject(v))
       .filter(([, name]) => typeof name === 'string' && name.trim())
       .map(([id, name]) => [id, name.trim().slice(0, 120)]),
+  )
+/**
+ * Colours you picked for zones, keyed by project name like `plots`. `color` is a 24-bit RGB
+ * integer; `finder` is the Finder label (0–7) this colour was last synced as, which is how a
+ * later scan tells a colour changed in Finder from one that simply has never been synced.
+ */
+const asZoneColors = (v) =>
+  Object.fromEntries(
+    Object.entries(asObject(v))
+      .map(([name, c]) => [name, asObject(c)])
+      .filter(([name, c]) => name && Number.isInteger(c.color) && c.color >= 0 && c.color <= 0xffffff)
+      .map(([name, c]) => [name, { color: c.color, finder: Number.isInteger(c.finder) ? c.finder & 7 : 0 }]),
   )
 
 async function readState() {
@@ -88,6 +102,7 @@ async function readState() {
       hiddenProjects: asArray(raw.hiddenProjects).map(String).filter(Boolean),
       viewedAt: asObject(raw.viewedAt),
       names: asNames(raw.names),
+      zoneColors: asZoneColors(raw.zoneColors),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -124,6 +139,7 @@ async function writeState(next) {
     hiddenProjects: asArray(next.hiddenProjects).map(String).filter(Boolean),
     viewedAt: asObject(next.viewedAt),
     names: asNames(next.names),
+    zoneColors: asZoneColors(next.zoneColors),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }
@@ -491,6 +507,35 @@ export async function apiMiddleware(req, res, next) {
       const harness = body.harness || (await defaultHarness())
       const shown = await present(await harnessNewSession(harness, dir), viaOf(body))
       return send(res, shown.ok ? 200 : 400, shown)
+    }
+
+    /**
+     * Finder colour tags, read for every zone's folder in one request and written one folder at
+     * a time. macOS only: elsewhere the read says `supported: false` and the page never asks
+     * again. Folders get the same on-this-machine check as Reveal, and the batch is capped so a
+     * page cannot turn this into a way to stat the whole disk.
+     */
+    if (url.pathname === '/api/finder-colors' && req.method === 'POST') {
+      if (!finderTagsSupported()) return send(res, 200, { supported: false, colors: {} })
+      const body = await readJsonBody(req)
+      const folders = (Array.isArray(body.folders) ? body.folders : []).slice(0, 200)
+      const colors = {}
+      await Promise.all(
+        folders.map(async (folder) => {
+          const dir = await resolveFolder(folder)
+          if (dir) colors[folder] = await readFinderColor(dir)
+        })
+      )
+      return send(res, 200, { supported: true, colors })
+    }
+
+    if (url.pathname === '/api/finder-color' && req.method === 'POST') {
+      if (!finderTagsSupported()) return send(res, 400, { ok: false, error: 'Finder tags are macOS only' })
+      const body = await readJsonBody(req)
+      const dir = await resolveFolder(body.folder)
+      if (!dir) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
+      await writeFinderColor(dir, body.color)
+      return send(res, 200, { ok: true, color: await readFinderColor(dir) })
     }
 
     return send(res, 404, { error: 'Unknown endpoint' })

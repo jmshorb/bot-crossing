@@ -142,7 +142,7 @@ const PARTICLE_BUDGET = { off: 0, low: 900, full: 3000 }
  */
 export const MAX_AGENT_CAP = Math.max(...Object.values(PRESETS).map((p) => p.values.maxAgents || 0))
 
-const DEFAULTS = {
+export const DEFAULTS = {
   preset: 'balanced',
   ...PRESETS.balanced.values,
 
@@ -155,6 +155,12 @@ const DEFAULTS = {
    * one click and a folded repo returns to the same ground the moment a thread wakes up.
    */
   hideDormant: true,
+  /** Suits tinted by the AI tool the bot works for — orange Claude, blue Antigravity, green Codex. */
+  tintByHarness: true,
+  /** The tint per tool, as RGB. Kept as one key each so a change is a plain value compare. */
+  tintClaudeCode: 0xe0682a,
+  tintAntigravity: 0x3a74e0,
+  tintCodex: 0x2fa878,
   timeOfDay: 0.32, // 0..1 — 0 is midnight, 0.5 is noon
   autoTime: false,
   /** Sky follows this machine's own clock. Wins over `autoTime`; both off is manual. */
@@ -197,6 +203,13 @@ const DEFAULTS = {
   showFps: false,
   showLabels: true,
   reducedMotion: false,
+
+  /**
+   * macOS: mirror each zone's colour onto its folder as a Finder colour tag, and pick up a
+   * colour set in Finder. The one thing Bot Crossing writes outside colony.json — see
+   * server/lib/finder-tags.mjs — so it can be switched off.
+   */
+  finderTags: true,
 
   // Opening
   openIn: 'app', // 'app' | 'terminal' — the harness's desktop app, or its CLI in a new window

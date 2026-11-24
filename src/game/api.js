@@ -111,3 +111,8 @@ export const openThread = (thread, via) => post('/api/open', { harness: thread.h
 export const newSession = (folder, harness, via) => post('/api/new-session', { folder, harness, via })
 
 export const revealFolder = (folder) => post('/api/reveal', { folder })
+
+/** Finder colour (0–7) per folder path. `supported` is false off macOS. */
+export const fetchFinderColors = (folders) => post('/api/finder-colors', { folders })
+
+export const setFinderColor = (folder, color) => post('/api/finder-color', { folder, color })
