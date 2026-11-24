@@ -6,37 +6,44 @@ import * as THREE from 'three'
  *
  * One place rather than a random patch of grass next to each zone, because the colony is a map
  * you read at a glance: everything waiting on the outside world is in one spot, and how full the
- * loungers are says how much is parked. Built at real size in world units on a raised deck, so
- * uneven ground under it never shows, and placed by the colony on open ground near the lander.
+ * loungers are says how much is parked. It is a hex tile of the colony's own lattice — the cell
+ * beside the lander, reserved like the lander's (see LOUNGE_CELL in plot-move.js) — at a zone
+ * deck's size and height, so it reads as part of the base rather than something dropped near it.
  *
- * Local frame: the pool's long axis is X, the bar is at +X, loungers face the water from ±Z.
+ * Local frame: the pool's long axis is X, the bar is at +X, loungers face the water from ±Z. The
+ * hex is flat-topped with corners on ±X, which is also the lattice's, and the colony only turns
+ * the lounge by whole sixths so the two always agree.
  *
- * On airless or hostile worlds — Luna, Mars, Frost, Cinder — the whole lounge sits under a glass
- * dome on a round plinth, because a pool party in a vacuum wants a roof.
+ * On airless or hostile worlds — Luna, Mars, Frost, Cinder — the whole lounge is enclosed: a
+ * hexagonal glass prism with a low pyramid roof.
  */
 
 /** Planets whose lounge is under a dome. */
 export const DOMED_PLANETS = new Set(['moon', 'mars', 'tundra', 'volcanic'])
 
+/** The hex's corner radius: a zone tile's, pulled in a hair so it never z-fights a neighbour. */
+export const HEX_R = 7.6 * 0.992
+
 export const LOUNGE = {
-  deckW: 11.5,
-  deckD: 8.4,
   poolW: 5.4,
   poolD: 2.6,
-  /** How far the deck stands above the highest ground under it. */
-  lift: 0.32,
-  /** The radius the colony keeps clear of scatter, and checks for open ground. */
-  radius: 7.4,
+  /** The radius the colony keeps clear of scatter round the lounge's centre. */
+  radius: 8.6,
   /** Seat height on a lounger, above the deck. */
   seatY: 0.3,
   /** Lounger x positions along each side; four a side. */
   seatsX: [-2.55, -0.85, 0.85, 2.55],
   seatZ: 2.55,
   barX: 4.55,
-  /** The dome's footprint: an ellipse round the deck, corners and all. */
-  domeRX: 8.2,
-  domeRZ: 6.0,
-  domeH: 4.6,
+  /** The enclosure: wall height and roof rise. */
+  wallH: 4.0,
+  roofH: 1.3,
+}
+
+/** Whether a local point is inside a flat-topped hex of corner radius `r`. */
+function inHex(lx, lz, r) {
+  const k = (r * Math.sqrt(3)) / 2
+  return Math.abs(lz) <= k && (Math.abs(lx) * Math.sqrt(3)) / 2 + Math.abs(lz) / 2 <= k
 }
 
 const WOOD = 0xc89a63
@@ -45,8 +52,8 @@ const THATCH = 0xb48a45
 
 export class Lounge {
   /**
-   * `center` is a world point on the ground, `angle` the deck's turn about Y, `deckY` the top of
-   * the deck in world units.
+   * `center` is the cell's centre, `angle` the deck's turn about Y (a multiple of 60°), `deckY`
+   * the top of the deck.
    */
   constructor(center, angle, deckY, { dome = false } = {}) {
     this.dome = dome
@@ -60,6 +67,7 @@ export class Lounge {
     this._mats = []
     this._geos = []
     this.uniforms = { uTime: { value: 0 } }
+    this.group.updateMatrixWorld(true)
     this._build()
     if (dome) this._buildDome()
     this.group.updateMatrixWorld(true)
@@ -92,16 +100,36 @@ export class Lounge {
     const cushion = this._mat({ color: 0xf4efe6, roughness: 0.9 })
     const stripe = this._mat({ color: 0x3fb6c9, roughness: 0.9 })
 
-    // The deck: a slab deep enough to bury uneven ground, its top at y = 0 locally, built as four
-    // pieces round the pool's hole — one solid slab put its top straight over the water.
+    // The deck: a hex slab at a zone's size, deep enough to bury uneven ground, its top at y = 0
+    // locally, with the pool's hole cut through it — a solid slab put its top over the water.
     const holeW = L.poolW + 0.56
     const holeD = L.poolD + 0.56
-    const sideD = (L.deckD - holeD) / 2
-    const endW = (L.deckW - holeW) / 2
-    this._add(new THREE.BoxGeometry(L.deckW, 1.6, sideD), deck, 0, -0.8, holeD / 2 + sideD / 2, 0, false)
-    this._add(new THREE.BoxGeometry(L.deckW, 1.6, sideD), deck, 0, -0.8, -holeD / 2 - sideD / 2, 0, false)
-    this._add(new THREE.BoxGeometry(endW, 1.6, holeD), deck, holeW / 2 + endW / 2, -0.8, 0, 0, false)
-    this._add(new THREE.BoxGeometry(endW, 1.6, holeD), deck, -holeW / 2 - endW / 2, -0.8, 0, 0, false)
+    const hex = new THREE.Shape()
+    for (let i = 0; i <= 6; i++) {
+      const a = (i / 6) * Math.PI * 2
+      if (i === 0) hex.moveTo(HEX_R * Math.cos(a), HEX_R * Math.sin(a))
+      else hex.lineTo(HEX_R * Math.cos(a), HEX_R * Math.sin(a))
+    }
+    const hole = new THREE.Path()
+    hole.moveTo(-holeW / 2, -holeD / 2)
+    hole.lineTo(-holeW / 2, holeD / 2)
+    hole.lineTo(holeW / 2, holeD / 2)
+    hole.lineTo(holeW / 2, -holeD / 2)
+    hole.lineTo(-holeW / 2, -holeD / 2)
+    hex.holes.push(hole)
+    const slab = new THREE.ExtrudeGeometry(hex, { depth: 1.6, bevelEnabled: false })
+    // Shape x/y are the lounge's x/z; extruded along +Z, then turned to hang down from y = 0.
+    slab.rotateX(Math.PI / 2)
+    this._add(slab, deck, 0, 0, 0, 0, false)
+    // A wooden kerb round the edge, the way a zone's deck has its coloured one.
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2
+      const a1 = ((i + 1) / 6) * Math.PI * 2
+      const mx = ((Math.cos(a0) + Math.cos(a1)) / 2) * (HEX_R - 0.09)
+      const mz = ((Math.sin(a0) + Math.sin(a1)) / 2) * (HEX_R - 0.09)
+      const kerb = this._add(new THREE.BoxGeometry(HEX_R, 0.1, 0.18), wood, mx, 0.05, mz, 0, false)
+      kerb.rotation.y = -Math.atan2(mz, mx) + Math.PI / 2
+    }
     // The basin's walls, so the hole has sides rather than a view into the slab.
     const wall = this._mat({ color: 0x7fcfe0, roughness: 0.5 })
     this._add(new THREE.BoxGeometry(holeW, 0.6, 0.06), wall, 0, -0.3, holeD / 2 - 0.03, 0, false)
@@ -196,57 +224,58 @@ export class Lounge {
   }
 
   /**
-   * A glass dome on a round plinth: the plinth buries the ground round the deck out to the
-   * dome's edge, the glass is a faint, slightly blue shell, and eight ribs and a base ring give it
-   * a frame so it reads as a structure rather than a soap bubble.
+   * The enclosure for hostile worlds: a hexagonal glass prism standing on the deck's edge, with a
+   * low six-sided pyramid roof and a pale frame — posts at the corners, a ring at the eaves and
+   * ridges up to the apex.
    */
   _buildDome() {
     const L = LOUNGE
-    const plinth = this._mat({ color: 0xb9bcc2, roughness: 0.8, metalness: 0.1 })
-    // A ring, not a disc: the deck already fills the middle, and a solid plinth put its top
-    // straight over the pool. An ellipse with the deck's rectangle cut out, extruded downward.
-    const ring = new THREE.Shape()
-    ring.absellipse(0, 0, L.domeRX + 0.25, L.domeRZ + 0.25, 0, Math.PI * 2, false, 0)
-    const hole = new THREE.Path()
-    hole.moveTo(-L.deckW / 2, -L.deckD / 2)
-    hole.lineTo(L.deckW / 2, -L.deckD / 2)
-    hole.lineTo(L.deckW / 2, L.deckD / 2)
-    hole.lineTo(-L.deckW / 2, L.deckD / 2)
-    hole.lineTo(-L.deckW / 2, -L.deckD / 2)
-    ring.holes.push(hole)
-    const geo = new THREE.ExtrudeGeometry(ring, { depth: 1.62, bevelEnabled: false, curveSegments: 48 })
-    // Shape x/y are the lounge's x/z; extruded along +Z, then turned so it hangs down from y = 0.
-    geo.rotateX(Math.PI / 2)
-    this._add(geo, plinth, 0, 0, 0, 0, false)
-
+    const R = HEX_R - 0.12
     const glass = this._mat({
       color: 0xcfe8ff,
       roughness: 0.05,
       metalness: 0,
       transparent: true,
-      opacity: 0.14,
+      opacity: 0.15,
       side: THREE.DoubleSide,
       depthWrite: false,
     })
-    const shell = this._add(new THREE.SphereGeometry(1, 48, 18, 0, Math.PI * 2, 0, Math.PI / 2), glass, 0, 0, 0, 0, false)
-    shell.scale.set(L.domeRX, L.domeH, L.domeRZ)
-    // Drawn after everything inside it, so the inside shows through.
-    shell.renderOrder = 3
-
     // Matte: a polished frame caught the sun as hard white glints the bloom turned into stars.
     const frame = this._mat({ color: 0xdfe3e8, roughness: 0.75, metalness: 0.1 })
-    const rim = this._add(new THREE.TorusGeometry(1, 0.012, 6, 64), frame, 0, 0.03, 0, 0, false)
-    rim.rotation.x = Math.PI / 2
-    rim.scale.set(L.domeRX, L.domeRZ, 4)
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2
-      const pts = []
-      for (let k = 0; k <= 16; k++) {
-        const t = (k / 16) * (Math.PI / 2)
-        pts.push(new THREE.Vector3(Math.cos(a) * Math.cos(t) * L.domeRX, Math.sin(t) * L.domeH, Math.sin(a) * Math.cos(t) * L.domeRZ))
-      }
-      this._add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.045, 5, false), frame, 0, 0, 0, 0, false)
+    const corner = (i) => {
+      const a = (i / 6) * Math.PI * 2
+      return new THREE.Vector3(R * Math.cos(a), 0, R * Math.sin(a))
     }
+    const bar = (from, to, r = 0.05) => {
+      const len = from.distanceTo(to)
+      const m = this._add(new THREE.CylinderGeometry(r, r, len, 6), frame, 0, 0, 0, 0, false)
+      m.position.copy(from).add(to).multiplyScalar(0.5)
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), to.clone().sub(from).normalize())
+      return m
+    }
+    const panel = (from, to, y0, y1) => {
+      const w = from.distanceTo(to)
+      const m = this._add(new THREE.PlaneGeometry(w, y1 - y0), glass, 0, 0, 0, 0, false)
+      m.position.copy(from).add(to).multiplyScalar(0.5)
+      m.position.y = (y0 + y1) / 2
+      m.rotation.y = -Math.atan2(to.z - from.z, to.x - from.x)
+      m.renderOrder = 3
+      return m
+    }
+    const H = L.wallH
+    for (let i = 0; i < 6; i++) {
+      const a = corner(i)
+      const b = corner(i + 1)
+      bar(a, a.clone().setY(H), 0.06)
+      bar(a.clone().setY(H), b.clone().setY(H))
+      panel(a, b, 0, H)
+    }
+    // The roof: a shallow six-sided pyramid. Three's cone starts its first corner on +Z, a pointy
+    // hex; turning it a twelfth puts its corners on the walls' corners.
+    const roof = this._add(new THREE.ConeGeometry(R, L.roofH, 6, 1, true), glass, 0, H + L.roofH / 2, 0, Math.PI / 6, false)
+    roof.renderOrder = 3
+    const apex = new THREE.Vector3(0, H + L.roofH, 0)
+    for (let i = 0; i < 6; i++) bar(corner(i).setY(H), apex, 0.045)
   }
 
   _waterMaterial() {
@@ -294,16 +323,17 @@ export class Lounge {
 
   /** Whether a point is somewhere a wandering guest may walk: on the deck, not in the pool. */
   onDeck(x, z) {
-    if (!this.contains(x, z, -0.45)) return false
+    const { lx, lz } = this._local(x, z)
+    if (!inHex(lx, lz, HEX_R - 0.6)) return false
+    return !(Math.abs(lx) < LOUNGE.poolW / 2 + 0.6 && Math.abs(lz) < LOUNGE.poolD / 2 + 0.6)
+  }
+
+  _local(x, z) {
     const dx = x - this.center.x
     const dz = z - this.center.z
     const c = Math.cos(-this.angle)
     const s = Math.sin(-this.angle)
-    const lx = dx * c - dz * s
-    const lz = dx * s + dz * c
-    // Under a dome the plinth ring counts as floor, but the deck's own edges are the limit.
-    if (Math.abs(lx) > LOUNGE.deckW / 2 - 0.45 || Math.abs(lz) > LOUNGE.deckD / 2 - 0.45) return false
-    return !(Math.abs(lx) < LOUNGE.poolW / 2 + 0.6 && Math.abs(lz) < LOUNGE.poolD / 2 + 0.6)
+    return { lx: dx * c + dz * s, lz: -dx * s + dz * c }
   }
 
   /** The bar's world position, for picking and for flying the camera to. */
@@ -313,19 +343,8 @@ export class Lounge {
 
   /** Whether a world point is on the deck — the ground there is the deck, not the terrain. */
   contains(x, z, margin = 0) {
-    const dx = x - this.center.x
-    const dz = z - this.center.z
-    const c = Math.cos(-this.angle)
-    const s = Math.sin(-this.angle)
-    const lx = dx * c - dz * s
-    const lz = dx * s + dz * c
-    // Under a dome the plinth is the floor out to the dome's edge.
-    if (this.dome) {
-      const rx = LOUNGE.domeRX + 0.25 + margin
-      const rz = LOUNGE.domeRZ + 0.25 + margin
-      return (lx * lx) / (rx * rx) + (lz * lz) / (rz * rz) <= 1
-    }
-    return Math.abs(lx) <= LOUNGE.deckW / 2 + margin && Math.abs(lz) <= LOUNGE.deckD / 2 + margin
+    const { lx, lz } = this._local(x, z)
+    return inHex(lx, lz, HEX_R + margin)
   }
 
   /** What the bots walk round: the pool and the bar, as circles in world space. */

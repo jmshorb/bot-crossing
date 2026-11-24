@@ -14,6 +14,7 @@ import {
   Plot,
   allocateCells,
   shipPosition,
+  loungePosition,
   createLabel,
   hashString,
   worldToHex,
@@ -21,7 +22,7 @@ import {
   PLOT_PALETTE,
   PLOT_CELL,
 } from '../world/plots.js'
-import { translateCells } from '../world/plot-move.js'
+import { translateCells, LOUNGE_CELL } from '../world/plot-move.js'
 import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts, harnessTint } from '../agents/astronauts.js'
@@ -312,6 +313,9 @@ export class Colony {
     }
     const ship = shipPosition()
     list.push({ x: ship.x, z: ship.z })
+    // The lounge's cell too, so an island grows under the pool as well as under the zones.
+    const lounge = loungePosition()
+    list.push({ x: lounge.x, z: lounge.z })
     return list.slice(0, SKY_MAX_CELLS)
   }
 
@@ -403,10 +407,7 @@ export class Colony {
     }
     this._placeLounge()
     const clear = []
-    if (this.lounge) {
-      const r = this.lounge.dome ? LOUNGE.domeRX + 1 : LOUNGE.radius + 1
-      clear.push({ x: this.lounge.center.x, z: this.lounge.center.z, r })
-    }
+    if (this.lounge) clear.push({ x: this.lounge.center.x, z: this.lounge.center.z, r: LOUNGE.radius })
     for (const plot of this.plotOrder) {
       for (const local of plot.localCenters) {
         clear.push({ x: plot.center.x + local.x, z: plot.center.z + local.z, r: 8.6 })
@@ -448,79 +449,26 @@ export class Colony {
 
   /** What the scatter has to avoid, as one string — cheap to compare every poll. */
   _plotFootprint() {
-    return this.plotOrder.map((plot) => plot.signature).join('|') + `|lounge:${this._loungeSpot()?.key ?? ''}`
+    return this.plotOrder.map((plot) => plot.signature).join('|')
   }
 
   /**
-   * Where the lounge goes: on open, dry ground near the lander, off every zone with a metre to
-   * spare, with its bar end turned away from the ship. The spot it already has wins while it is
-   * still good, so the pool only moves when a zone grows into it or the planet changes. Null when
-   * there is nowhere — a small island, say — and bots on a break sit by their own zone instead.
+   * The lounge: always on its own cell beside the lander (LOUNGE_CELL), at a zone deck's height,
+   * turned by whole sixths so its hex lines up with the lattice and its bar faces away from the
+   * ship. Rebuilt only when the planet changes, since that decides whether it is enclosed.
    */
-  _loungeSpot() {
-    const ship = shipPosition()
-    const water = this.planet.water?.level
-    // A domed lounge stands on a wider plinth, so it needs more open ground round it.
-    const R = DOMED_PLANETS.has(this.planet.id) ? LOUNGE.domeRX + 0.6 : LOUNGE.radius
-    const ok = (cx, cz) => {
-      if (Math.hypot(cx - ship.x, cz - ship.z) < R + 6) return false
-      for (let i = 0; i < 24; i++) {
-        const a = (i / 24) * Math.PI * 2
-        for (const r of [0, R * 0.5, R]) {
-          const x = cx + Math.cos(a) * r
-          const z = cz + Math.sin(a) * r
-          if (!this.onIsland(x, z)) return false
-          if (this.plotOrder.some((plot) => plot.containsWorld(x, z, 1))) return false
-          const h = terrainHeight(x, z, this.planet)
-          if (h < -1 || (water != null && h < water + 0.25)) return false
-        }
-      }
-      return true
-    }
-    const keep = this._loungeAt
-    let spot = keep && keep.planet === this.planet.id && ok(keep.x, keep.z) ? keep : null
-    if (!spot) {
-      const away = Math.atan2(ship.z, ship.x)
-      search: for (let r = R + 7; r < 70; r += 2.5) {
-        for (let k = 0; k < 28; k++) {
-          // Fan out from the side of the ship away from the colony's middle, alternating sides.
-          const a = away + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 14)
-          const x = ship.x + Math.cos(a) * r
-          const z = ship.z + Math.sin(a) * r
-          if (ok(x, z)) {
-            spot = { x, z, planet: this.planet.id }
-            break search
-          }
-        }
-      }
-    }
-    if (!spot) return null
-    spot.key = `${spot.planet}:${spot.x.toFixed(1)},${spot.z.toFixed(1)}`
-    this._loungeAt = spot
-    return spot
-  }
-
-  /** Build or move the lounge to match `_loungeSpot`. */
   _placeLounge() {
-    const spot = this._loungeSpot()
-    if (this.lounge && spot && this.lounge.key === spot.key) return
+    const key = this.planet.id
+    if (this.lounge && this.lounge.key === key) return
     this.lounge?.dispose()
-    this.lounge = null
-    if (!spot) return
+    const at = loungePosition()
     const ship = shipPosition()
-    const ux = spot.x - ship.x
-    const uz = spot.z - ship.z
-    // The bar (local +X) faces away from the lander.
-    const angle = Math.atan2(-uz, ux)
-    let top = -Infinity
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2
-      for (const r of [0, 2.5, 5, 6.5, 8.4]) top = Math.max(top, terrainHeight(spot.x + Math.cos(a) * r, spot.z + Math.sin(a) * r, this.planet))
-    }
-    this.lounge = new Lounge(new THREE.Vector3(spot.x, 0, spot.z), angle, top + LOUNGE.lift, {
-      dome: DOMED_PLANETS.has(this.planet.id),
-    })
-    this.lounge.key = spot.key
+    const away = Math.atan2(at.z - ship.z, at.x - ship.x)
+    const sixth = Math.PI / 3
+    // Three's turn about Y runs the other way to atan2 in the ground plane, hence the minus.
+    const angle = -Math.round(away / sixth) * sixth
+    this.lounge = new Lounge(at, angle, DECK_TOP, { dome: DOMED_PLANETS.has(this.planet.id) })
+    this.lounge.key = key
     this.scene.add(this.lounge.group)
   }
 
@@ -839,6 +787,8 @@ export class Colony {
     for (const plot of this.plotOrder) {
       for (const cell of plot.cells) this.deckedCells.add(`${cell.q},${cell.r}`)
     }
+    // The lounge's deck is ground at a zone deck's height too.
+    this.deckedCells.add(`${LOUNGE_CELL.q},${LOUNGE_CELL.r}`)
     this._syncLabels()
   }
 

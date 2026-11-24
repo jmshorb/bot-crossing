@@ -19,6 +19,16 @@ export const HEX_DIRS = [
 /** The lattice cell the ship owns. Nothing else may be placed there. */
 export const SHIP_CELL = { q: -2, r: 1 }
 
+/**
+ * The lounge's cell: the lander's outer neighbour, so the pool is a hex tile attached to the
+ * landing pad on the side away from the colony. Reserved like the ship's — no zone is placed
+ * on it, grows into it or can be dragged onto it.
+ */
+export const LOUNGE_CELL = { q: -3, r: 1 }
+
+/** Whether a cell key belongs to the ship or the lounge rather than to anybody's zone. */
+export const isReservedCell = (k) => k === cellKey(SHIP_CELL.q, SHIP_CELL.r) || k === cellKey(LOUNGE_CELL.q, LOUNGE_CELL.r)
+
 export const ORIGIN = { q: 0, r: 0 }
 
 /**
@@ -56,7 +66,7 @@ export function isConnected(out) {
   for (const [, list] of out) for (const c of list) cells.set(cellKey(c.q, c.r), c)
   if (cells.size < 2) return true
   const ship = cellKey(SHIP_CELL.q, SHIP_CELL.r)
-  const passable = new Set([...cells.keys(), ship])
+  const passable = new Set([...cells.keys(), ship, cellKey(LOUNGE_CELL.q, LOUNGE_CELL.r)])
   const [start] = cells.keys()
   const seen = new Set([start])
   const queue = [cells.get(start)]
@@ -70,9 +80,10 @@ export function isConnected(out) {
       queue.push(n)
     }
   }
-  // The ship is a stepping stone, not a member: it does not have to be reached for the colony
-  // to be whole, and it does not count toward what has to be.
+  // The ship — and the lounge beside it — are stepping stones, not members: neither has to be
+  // reached for the colony to be whole, and neither counts toward what has to be.
   seen.delete(ship)
+  seen.delete(cellKey(LOUNGE_CELL.q, LOUNGE_CELL.r))
   return seen.size === cells.size
 }
 
@@ -101,10 +112,9 @@ export function fits(layout, name, dq, dr) {
     if (id === name) continue
     for (const c of list) occupied.add(cellKey(c.q, c.r))
   }
-  const ship = cellKey(SHIP_CELL.q, SHIP_CELL.r)
   for (const c of moved) {
     const k = cellKey(c.q, c.r)
-    if (k === ship || occupied.has(k)) return false
+    if (isReservedCell(k) || occupied.has(k)) return false
     if (hexDistance(c, ORIGIN) >= POOL_RINGS) return false
   }
   return true

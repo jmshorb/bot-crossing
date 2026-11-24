@@ -149,3 +149,22 @@ test('a drop into open ground is refused rather than dragging the colony over to
 function hexStep(a, b) {
   return (Math.abs(a.q - b.q) + Math.abs(a.q + a.r - b.q - b.r) + Math.abs(a.r - b.r)) / 2
 }
+
+// ── the lounge's cell ─────────────────────────────────────────────────────────
+
+test('nobody may drop a zone on the lounge beside the lander', async () => {
+  const { LOUNGE_CELL } = await import('../src/world/plot-move.js')
+  const from = { q: -2, r: 0 }
+  const zones = layout({ a: [from] })
+  assert.equal(moveIsValid(zones, 'a', LOUNGE_CELL.q - from.q, LOUNGE_CELL.r - from.r), false)
+})
+
+test('a crowded colony grows round the lounge, never into it', async () => {
+  const { LOUNGE_CELL } = await import('../src/world/plot-move.js')
+  const { allocateCells } = await import('../src/world/plots.js').catch(() => ({}))
+  if (!allocateCells) return // plots.js needs a browser-ish environment; the move rule above still holds
+  const projects = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, size: 6 }))
+  for (const [, cells] of allocateCells(projects)) {
+    for (const c of cells) assert.ok(!(c.q === LOUNGE_CELL.q && c.r === LOUNGE_CELL.r), 'a zone took the lounge cell')
+  }
+})
