@@ -58,6 +58,9 @@ const PALMS = [
   [(Math.PI / 3) * 5, 5.8, 2.05, 0.22],
 ]
 
+/** How far either side of the bar's middle the torches stand: half a unit clear of the eaves. */
+const TORCH_Z = 3.1
+
 const WOOD = 0xc89a63
 const BAMBOO = 0xd8b46a
 
@@ -219,13 +222,19 @@ export class Lounge {
     }
     const sign = this._add(new THREE.PlaneGeometry(1.7, 0.5), this._mat({ map: signTexture(), roughness: 0.8 }), bx - 0.37, 1.62, 0, -Math.PI / 2, false)
     sign.rotation.y = -Math.PI / 2
-    // Two torches at the bar's corners, which glow after dark.
+    // Two torches, one off each end of the bar, which glow after dark. Out past the eaves on
+    // purpose: the thatch reaches about 2.5 either side of the counter, and a flame under straw
+    // is a fire waiting to happen. Tall enough to see over the counter from the pool.
     this.flames = []
-    for (const pz of [-1.9, 1.9]) {
-      this._add(new THREE.CylinderGeometry(0.035, 0.05, 1.6, 8), bamboo, bx - 1.2, 0.8, pz)
-      const flame = this._add(new THREE.SphereGeometry(0.12, 10, 8), this._mat({ color: 0xffa040, emissive: 0xff7a1a, emissiveIntensity: 1.2 }), bx - 1.2, 1.7, pz, 0, false)
+    this.torches = []
+    for (const pz of [-TORCH_Z, TORCH_Z]) {
+      this._add(new THREE.CylinderGeometry(0.035, 0.05, 1.9, 8), bamboo, bx, 0.95, pz)
+      const cup = this._add(new THREE.CylinderGeometry(0.1, 0.06, 0.16, 10), wood, bx, 1.96, pz)
+      cup.castShadow = false
+      const flame = this._add(new THREE.SphereGeometry(0.12, 10, 8), this._mat({ color: 0xffa040, emissive: 0xff7a1a, emissiveIntensity: 1.2 }), bx, 2.12, pz, 0, false)
       flame.scale.set(1, 1.5, 1)
       this.flames.push(flame)
+      this.torches.push(new THREE.Vector3(bx, 0, pz))
     }
     /** Where the bar is, locally, for picking. */
     this.barLocal = new THREE.Vector3(bx, 1.3, 0)
@@ -448,7 +457,7 @@ export class Lounge {
     }
     const bar = toWorld(LOUNGE.barX, 0)
     out.push({ x: bar.x, z: bar.z, r: 1.4, keep: 1.4 })
-    for (const p of this.palms) {
+    for (const p of [...this.palms, ...this.torches]) {
       const w = toWorld(p.x, p.z)
       out.push({ x: w.x, z: w.z, r: 0.45, keep: 0.45 })
     }
