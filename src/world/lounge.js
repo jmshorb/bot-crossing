@@ -296,11 +296,10 @@ export class Lounge {
   }
 
   /**
-   * The bar's roof: grass thatch rather than a smooth cone. Three overlapping tiers of straw, each
-   * a four-sided pyramid with its own ragged fringe of strands hanging off the eaves, and a bound
-   * topknot at the peak. The straw is one procedural texture laid down the slope, so the strands
-   * run the way rain would; the fringe is the same straw cut into uneven ends with alpha.
-   * `y` is the eaves' height, where the lowest tier's fringe starts.
+   * The bar's roof: grass thatch rather than a smooth cone. One four-sided pyramid of straw with a
+   * ragged fringe of strands hanging off its eaves. The straw is a procedural texture laid down
+   * the slope, so the strands run the way rain would; the fringe is the same straw cut into uneven
+   * ends with alpha. `y` is the eaves' height.
    */
   _buildThatch(x, y) {
     const straw = this._mat({ map: strawTexture(false), roughness: 0.95, side: THREE.DoubleSide, color: 0xffffff })
@@ -311,26 +310,17 @@ export class Lounge {
       alphaTest: 0.5,
       color: 0xffffff,
     })
-    const tiers = [
-      { r: 2.5, h: 0.78, y: 0 },
-      { r: 1.85, h: 0.66, y: 0.42 },
-      { r: 1.2, h: 0.58, y: 0.8 },
-    ]
-    for (const t of tiers) {
-      const cone = this._add(new THREE.ConeGeometry(t.r, t.h, 4, 1, true), straw, x, y + t.y + t.h / 2, 0, Math.PI / 4)
-      cone.scale.set(1, 1, 1.35)
-      // The fringe: a short, slightly flared skirt just under the tier's edge.
-      const skirt = this._add(new THREE.CylinderGeometry(t.r * 0.99, t.r * 1.07, 0.34, 4, 1, true), fringe, x, y + t.y - 0.12, 0, Math.PI / 4)
-      skirt.scale.set(1, 1, 1.35)
-    }
-    // The topknot: a tight cone of straw and a band of twine round its base.
-    this._add(new THREE.ConeGeometry(0.42, 0.62, 8, 1), straw, x, y + 1.38 + 0.31, 0)
-    const band = this._add(new THREE.TorusGeometry(0.3, 0.05, 6, 16), this._mat({ color: 0x6b4a2a, roughness: 0.9 }), x, y + 1.46, 0)
-    band.rotation.x = Math.PI / 2
+    const r = 2.5
+    const h = 1.35
+    const cone = this._add(new THREE.ConeGeometry(r, h, 4, 1, true), straw, x, y + h / 2, 0, Math.PI / 4)
+    cone.scale.set(1, 1, 1.35)
+    // The fringe: a short, slightly flared skirt just under the eaves.
+    const skirt = this._add(new THREE.CylinderGeometry(r * 0.99, r * 1.07, 0.38, 4, 1, true), fringe, x, y - 0.14, 0, Math.PI / 4)
+    skirt.scale.set(1, 1, 1.35)
   }
 
   /**
-   * A small palm: a ringed trunk curving up out of a planter of sand, seven fronds drooping from
+   * A small palm: a ringed trunk curving up out of a low mound of soil, seven fronds drooping from
    * the crown — each a strip bent into an arch and cut into leaflets by an alpha texture — and a
    * cluster of coconuts. `lean` tips the trunk away from the deck's middle.
    */
@@ -354,8 +344,10 @@ export class Lounge {
       const m = this._add(new THREE.TorusGeometry(0.095, 0.022, 5, 10), ring, p.x, p.y, p.z)
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), t)
     }
-    // The planter: a low ring of sand-coloured stone round the trunk's foot.
-    this._add(new THREE.CylinderGeometry(0.42, 0.46, 0.16, 12), this._mat({ color: 0xcdb98f, roughness: 0.9 }), x, 0.08, z)
+    // A low mound of soil round the trunk's foot: earth brown flecked with moss green.
+    const soil = this._soil || (this._soil = this._mat({ map: soilTexture(), roughness: 1 }))
+    const mound = this._add(new THREE.SphereGeometry(0.5, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2), soil, x, 0, z)
+    mound.scale.set(1, 0.28, 1)
     const top = curve.getPoint(1)
     const leaf = this._mat({ map: frondTexture(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, color: 0xffffff })
     const fronds = 7
@@ -592,4 +584,33 @@ function frondGeometry(length) {
   pos.needsUpdate = true
   geo.computeVertexNormals()
   return geo
+}
+
+/** Soil: a dark earth brown, mottled lighter and darker, with flecks and tufts of moss green. */
+function soilTexture() {
+  const c = document.createElement('canvas')
+  c.width = 128
+  c.height = 128
+  const g = c.getContext('2d')
+  g.fillStyle = '#5a4030'
+  g.fillRect(0, 0, 128, 128)
+  let seed = 11
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  const tones = ['#4a3426', '#6b4d36', '#3f2c20', '#7a5a3e']
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = tones[Math.floor(rand() * tones.length)]
+    g.beginPath()
+    g.arc(rand() * 128, rand() * 128, 1 + rand() * 4, 0, Math.PI * 2)
+    g.fill()
+  }
+  const greens = ['#4f7a34', '#3f6a2a', '#6b8f3e']
+  for (let i = 0; i < 140; i++) {
+    g.fillStyle = greens[Math.floor(rand() * greens.length)]
+    g.beginPath()
+    g.arc(rand() * 128, rand() * 128, 0.8 + rand() * 2.6, 0, Math.PI * 2)
+    g.fill()
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
 }
