@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { withCurve } from '../core/curve.js'
 
 /**
  * The lounge: where threads on a break go to wait. A deck with a pool, a row of loungers down
@@ -418,6 +419,10 @@ export class Lounge {
     const m = this._mat({ color: 0x2fb8e0, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.88, emissive: 0x0a3d52 })
     const uniforms = this.uniforms
     m.onBeforeCompile = (shader) => {
+      // A material with its own onBeforeCompile replaces the one that bends it with the world
+      // (see "Every hand-written shader calls withCurve" in DECISIONS.md). Without this the water
+      // stayed flat while the deck curved away under it, and from low or far it floated.
+      withCurve(shader)
       shader.uniforms.uTime = uniforms.uTime
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uTime;')
