@@ -2,6 +2,32 @@
 
 **[botcrossing.com](https://botcrossing.com)**
 
+> **This is Justin Shorb's fork** of [Station-Sciences/bot-crossing](https://github.com/Station-Sciences/bot-crossing).
+> Everything below describes the original, plus these additions:
+>
+> - **Zone colour picker.** Click the swatch beside an open zone's name, or right-click a repo in
+>   the sidebar, to pick a zone's colour: seven swatches, a custom colour, or back to automatic.
+> - **Finder colour sync (macOS).** A zone's colour is mirrored onto its folder as a Finder colour
+>   tag, and a colour you set in Finder comes back to the map. Finder has seven colours, so a custom
+>   colour is tagged as the nearest. This writes the folder's Finder tags, the one exception to
+>   "colony.json is the only file it writes", so it can be turned off in Settings → View.
+> - **Antigravity desktop app.** Conversations from the Antigravity app (not only the CLI) appear,
+>   in the right zone, with the app's own titles.
+> - **Bots tinted by AI tool.** Orange for Claude Code, blue for Antigravity, green for Codex, each
+>   changeable in Settings → View.
+> - **Permission prompts show as `?`.** A Claude Code thread waiting on Allow/Deny no longer
+>   looks busy.
+>
+> All but the Finder sync have been offered upstream as pull requests
+> ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),
+> [#111](https://github.com/Station-Sciences/bot-crossing/pull/111),
+> [#112](https://github.com/Station-Sciences/bot-crossing/pull/112),
+> [#113](https://github.com/Station-Sciences/bot-crossing/pull/113)).
+>
+> **To run this version:**
+> `git clone https://github.com/jmshorb/bot-crossing.git && cd bot-crossing && npm install && npm start`,
+> then open http://localhost:5274.
+
 Every coding-agent thread on this machine is a little bot. They walk out of the ship, claim
 a plot for their repo, and build something. When one needs you it stops and holds a `?` over
 its head; click it and the thread opens back in whichever harness it came from.
