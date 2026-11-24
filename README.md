@@ -21,8 +21,16 @@
 >   circles its parent's building as a drone in its tool's colour, instead of walking the zone
 >   as a bot of its own. Click a bot and its drones light up, with their names on its card;
 >   click a drone to select the bot that sent it. Switch back in Settings → View.
+> - **Breaks.** "Take a break" on a bot's card parks a thread that is waiting on the outside
+>   world — another person's fix, a deploy — with what it is waiting for and an optional "until".
+>   Its card reads "Dreaming about …"; when the time comes it walks back and asks "Break's over —
+>   is … ready?". Nothing is sent to the AI.
+> - **The lounge.** Bots on a break go to a hex tile beside the lander with a pool, eight
+>   loungers, palms and a thatched tiki bar, and lie back with a daiquiri in a random bright
+>   colour under an umbrella in their own suit colour. Click the tiki bar (or the "on break"
+>   count) for the guest list. On Luna, Mars, Frost and Cinder it is under a glass enclosure.
 >
-> All but the Finder sync and the drones have been offered upstream as pull requests
+> All but the Finder sync, the drones, breaks and the lounge have been offered upstream as pull requests
 > ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),
 > [#111](https://github.com/Station-Sciences/bot-crossing/pull/111),
 > [#112](https://github.com/Station-Sciences/bot-crossing/pull/112),
