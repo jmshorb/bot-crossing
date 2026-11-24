@@ -643,9 +643,14 @@ body {
   flex-wrap: wrap;
 }
 
-.thread-pop .meta .swarm {
+.thread-pop .meta .swarm,
+.thread-pop .meta .parked {
   flex-basis: 100%;
   color: var(--text);
+}
+
+.thread-pop .meta .parked {
+  color: #e2b45c;
 }
 
 .thread-pop .tag {
@@ -837,6 +842,74 @@ body {
 }
 .stat.idle {
   color: #b6b5be;
+}
+.stat.break {
+  color: #e2b45c;
+}
+
+/* ── a break: the card's own row, and the form it opens ─────────────────────────── */
+
+.thread-pop .break-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 6px;
+  height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.thread-pop .break-btn:hover {
+  color: var(--text);
+}
+
+.thread-pop .break-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.thread-pop .break-form[hidden] {
+  display: none;
+}
+
+.thread-pop .break-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.thread-pop .break-form input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  color-scheme: dark;
+}
+
+.thread-pop .break-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.thread-pop .break-quick .btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.thread-pop .break-go {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 /* ── the two panes: every repo, or the one you picked ───────────────────────────── */

@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { withCurve } from '../core/curve.js'
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 
 /**
  * Things a working astronaut pulls out to check on its work.
@@ -59,6 +60,26 @@ const PHONE = {
   away: CHECK_LEN - 0.55, // and shrinks away as the arm drops
 }
 
+// ── the drink ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Something to drink on a break: a frozen daiquiri in a stemmed glass, set on the ground at the
+ * bot's side while it sits, with a paper umbrella in the bot's own suit colour.
+ *
+ * On the ground rather than in the hand: the sitting clip rests that hand flat on the floor, so
+ * anything held there lay under it as a smudge. Cartoon-big, like the phone, so it reads from the
+ * default camera height. The drink is one of a few bright flavours picked off the bot's id, so a
+ * bot keeps the same one for the whole break.
+ */
+const DRINK = {
+  height: 0.42, // world units, foot to rim
+  side: 0.44, // world units to the bot's left
+  ahead: 0.2, // and a little in front of it
+  out: 0.6, // seconds to appear as the bot settles
+}
+/** Strawberry, mango, blue curaçao, lime, passion fruit — pushed bright so the bloom catches them. */
+export const DRINK_COLORS = [0xff3b6b, 0xffa62b, 0x2fb6ff, 0x8be04e, 0xff6fd1]
+
 export class Props {
   constructor(R, capacity) {
     this.R = R
@@ -75,7 +96,109 @@ export class Props {
     this._n = 0
     /** The hold, exposed so it can be tuned live. */
     this.tune = PHONE
+    this.drinkTune = DRINK
     this._buildPhone()
+    this._buildDrink()
+  }
+
+  /**
+   * Built at its real size in world units, foot at y = 0: a glass (foot, stem and a wide coupe
+   * bowl, faintly see-through), the slush filling the bowl to just under the rim, and an umbrella
+   * stuck in at a jaunty angle. Four instanced meshes; the drink and the canopy take a colour
+   * per instance.
+   */
+  _buildDrink() {
+    const H = DRINK.height
+    const foot = new THREE.CylinderGeometry(0.075, 0.085, 0.012, 16)
+    foot.translate(0, 0.006, 0)
+    const stem = new THREE.CylinderGeometry(0.012, 0.014, H * 0.45, 8)
+    stem.translate(0, 0.012 + H * 0.225, 0)
+    // The bowl: a lathe from the top of the stem out to a wide rim, open at the top.
+    const base = 0.012 + H * 0.45
+    const bowlPts = []
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10
+      bowlPts.push(new THREE.Vector2(0.015 + 0.11 * Math.sin((t * Math.PI) / 2), base + t * (H - base)))
+    }
+    const bowl = mergeAll([foot, stem, new THREE.LatheGeometry(bowlPts, 20)])
+    // The slush: a slightly smaller solid of the same profile, domed a touch over the rim.
+    const slushPts = [new THREE.Vector2(0, base + 0.004)]
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10
+      slushPts.push(new THREE.Vector2(0.006 + 0.1 * Math.sin((t * Math.PI) / 2), base + 0.004 + t * (H - base - 0.012)))
+    }
+    slushPts.push(new THREE.Vector2(0.07, H + 0.012), new THREE.Vector2(0, H + 0.02))
+    const slush = new THREE.LatheGeometry(slushPts, 20)
+    // The umbrella: a shallow eight-panel canopy on a thin stick, leaning out of the drink.
+    const canopy = new THREE.ConeGeometry(0.1, 0.045, 8, 1, true)
+    canopy.translate(0, 0.19, 0)
+    const stick = new THREE.CylinderGeometry(0.004, 0.004, 0.2, 5)
+    stick.translate(0, 0.1, 0)
+    for (const g of [canopy, stick]) {
+      g.rotateZ(-0.45)
+      g.translate(0.03, H - 0.03, 0)
+    }
+
+    const glass = new THREE.MeshStandardMaterial({
+      color: 0xe8f4ff,
+      roughness: 0.08,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.38,
+      depthWrite: false,
+    })
+    const drink = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0, emissive: 0x000000 })
+    const paper = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0, side: THREE.DoubleSide })
+    const wood = new THREE.MeshStandardMaterial({ color: 0xe9dcc0, roughness: 0.8, metalness: 0 })
+
+    const make = (geo, mat, name, shadow = true) => {
+      const m = new THREE.InstancedMesh(geo, mat, this.capacity)
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+      m.count = 0
+      m.frustumCulled = false
+      m.castShadow = shadow
+      m.receiveShadow = false
+      m.name = name
+      this.meshes.push(m)
+      return m
+    }
+    const glassMesh = make(bowl, glass, 'prop-drink-glass', false)
+    // The glass is see-through, so it draws after the slush inside it.
+    glassMesh.renderOrder = 2
+    const slushMesh = make(slush, drink, 'prop-drink')
+    const canopyMesh = make(canopy, paper, 'prop-drink-umbrella')
+    const stickMesh = make(stick, wood, 'prop-drink-stick')
+    const white = new THREE.Color(1, 1, 1)
+    for (const m of [slushMesh, canopyMesh]) {
+      for (let i = 0; i < this.capacity; i++) m.setColorAt(i, white)
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage)
+    }
+    this.drink = { glass: glassMesh, slush: slushMesh, canopy: canopyMesh, stick: stickMesh }
+    this.drinkMeshes = new Set([glassMesh, slushMesh, canopyMesh, stickMesh])
+    this._nDrink = 0
+    this._drinkColor = new THREE.Color()
+  }
+
+  /**
+   * A daiquiri on the ground beside a sitting bot: `pos` and `yaw` are the bot's, `t` seconds
+   * since it sat down (the glass grows in over the first moment), `color` the drink's and
+   * `umbrella` the bot's own suit colour.
+   */
+  writeDrink(pos, yaw, t, color, umbrella) {
+    if (this._nDrink >= this.capacity) return
+    const i = this._nDrink++
+    const k = Math.max(0.001, smooth(t / DRINK.out))
+    const sin = Math.sin(yaw)
+    const cos = Math.cos(yaw)
+    // The bot faces +Z in its own frame, so its left is +X turned by the yaw.
+    this._v.set(pos.x + DRINK.side * cos + DRINK.ahead * sin, pos.y, pos.z - DRINK.side * sin + DRINK.ahead * cos)
+    this._e.set(0, yaw + 0.6, 0)
+    this._q.setFromEuler(this._e)
+    this._m.compose(this._v, this._q, this._s.setScalar(k))
+    const { glass, slush, canopy, stick } = this.drink
+    for (const m of [glass, slush, canopy, stick]) m.setMatrixAt(i, this._m)
+    slush.setColorAt(i, this._drinkColor.setHex(color))
+    canopy.setColorAt(i, this._drinkColor.setHex(umbrella))
   }
 
   _buildPhone() {
@@ -192,6 +315,7 @@ export class Props {
   /** Start a frame: nothing placed yet. */
   begin() {
     this._n = 0
+    this._nDrink = 0
   }
 
   /**
@@ -249,8 +373,12 @@ export class Props {
   /** End the frame: the counts are what was placed. */
   end() {
     for (const m of this.meshes) {
-      m.count = this._n
+      m.count = this.drinkMeshes.has(m) ? this._nDrink : this._n
       m.instanceMatrix.needsUpdate = true
+    }
+    if (this._nDrink) {
+      this.drink.slush.instanceColor.needsUpdate = true
+      this.drink.canopy.instanceColor.needsUpdate = true
     }
   }
 
@@ -261,6 +389,15 @@ export class Props {
   setShadows(on) {
     for (const m of this.meshes) m.castShadow = on
   }
+}
+
+/** Merge plain geometries into one, flattening any index so they agree. */
+function mergeAll(parts) {
+  const flat = parts.map((g) => (g.index ? g.toNonIndexed() : g))
+  for (const g of flat) {
+    for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name)
+  }
+  return BufferGeometryUtils.mergeGeometries(flat, false)
 }
 
 function smooth(x) {

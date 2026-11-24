@@ -26,6 +26,7 @@ import {
   setFinderColor,
 } from './game/api.js'
 import { FINDER_SWATCHES, nearestFinderColor, reconcileZoneColor } from './game/zone-colors.js'
+import { applyBreaks } from './game/breaks.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { ACTIVE, JumpRun, NEEDS_YOU, busiestOrder, crewOrder, inScope, needsYouOrder, nextInRing } from './game/jumps.js'
@@ -67,7 +68,7 @@ engine.setPlanetGrade(PLANETS[settings.get('planet')]?.grade)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, names: {}, zoneColors: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {}, names: {}, zoneColors: {}, breaks: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -320,10 +321,34 @@ const actions = {
   markViewed: () => {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
+    // A finished break that you have now seen is done with.
+    if (thread.breakOver) dropBreak(thread.id)
     state.viewedAt = { ...(state.viewedAt || {}), [thread.id]: Date.now() }
     queueSave()
     applyThreads(threads)
     hud.toast(`Marked ${thread.title.slice(0, 40)} as viewed`)
+  },
+
+  /**
+   * Send the selected thread on a break: off its building to sit on the grass with a drink until
+   * `until` (epoch ms, or 0 for no end), when it comes back and asks. `reason` is what it is
+   * waiting for, and becomes "Dreaming about <reason>" on its card.
+   */
+  takeBreak: (reason, until) => {
+    const thread = threads.find((t) => t.id === selectedId)
+    if (!thread) return
+    const clean = String(reason || '').trim().slice(0, 120)
+    state.breaks = { ...(state.breaks || {}), [thread.id]: { reason: clean, until: until > Date.now() ? until : 0, since: Date.now() } }
+    queueSave()
+    applyThreads(threads)
+    hud.toast(clean ? `Off for a break — dreaming about ${clean.slice(0, 40)}` : 'Off for a break')
+  },
+
+  /** Back to work: the bot gets up and walks back to its building. */
+  endBreak: () => {
+    if (!selectedId || !(state.breaks || {})[selectedId]) return
+    dropBreak(selectedId)
+    hud.toast('Back to work')
   },
 
   /** What the selected bot has out right now, by name — for the line on its card. */
@@ -423,6 +448,8 @@ const actions = {
   openThread: async () => {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
+    // Opening a thread whose break is over is answering the reminder.
+    if (thread.breakOver) dropBreak(thread.id)
     try {
       const shown = await openThread(thread, settings.get('openIn'))
       colony.astronauts.celebrate(thread.id)
@@ -1262,6 +1289,16 @@ function applyThreads(list) {
     }
     return t
   })
+  // Breaks you set from a card. One that its thread has since moved past — you picked the
+  // conversation back up and it started running — is over without a reminder.
+  const onBreak = applyBreaks(threads, state.breaks || {})
+  threads = onBreak.threads
+  if (onBreak.ended.length) {
+    const breaks = { ...(state.breaks || {}) }
+    for (const id of onBreak.ended) delete breaks[id]
+    state.breaks = breaks
+    queueSave()
+  }
   list = threads
   const hiddenSet = new Set(state.hiddenProjects || [])
 
@@ -1369,6 +1406,15 @@ const finderPending = new Set()
 /** Off on anything but macOS, and once the server has said so; on there unless you turn it off. */
 let finderSupported = /Mac/.test(navigator.platform)
 const finderSyncOn = () => finderSupported && settings.get('finderTags')
+
+function dropBreak(id) {
+  const breaks = { ...(state.breaks || {}) }
+  if (!(id in breaks)) return
+  delete breaks[id]
+  state.breaks = breaks
+  queueSave()
+  applyThreads(threads)
+}
 
 function applyZoneColors() {
   const colors = Object.fromEntries(Object.entries(state.zoneColors || {}).map(([name, c]) => [name, c.color]))

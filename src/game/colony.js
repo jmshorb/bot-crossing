@@ -65,7 +65,7 @@ const LIVE_GROWTH = 0.004
 /** How many zones' positions to remember, including repos with nothing running in them. */
 const LAYOUT_MEMORY = 80
 
-export const STATUS_ORDER = ['blocked', 'waiting', 'working', 'celebrating', 'idle', 'sleeping']
+export const STATUS_ORDER = ['blocked', 'waiting', 'working', 'celebrating', 'idle', 'sleeping', 'break']
 
 export const STATUS_LABEL = {
   working: 'Working',
@@ -74,6 +74,7 @@ export const STATUS_LABEL = {
   celebrating: 'Shipped',
   idle: 'Idle',
   sleeping: 'Dormant',
+  break: 'On a break',
   spawning: 'Arriving',
   leaving: 'Heading home',
 }
@@ -94,6 +95,8 @@ const isAlarming = (thread, now = Date.now()) =>
 
 /** Thread → behaviour. First match wins, exactly like the board's auto-sort. */
 export function statusFor(thread, now = Date.now()) {
+  // Parked by you: not working, not wanting you, just waiting on the world. See breaks.js.
+  if (thread.onBreak) return 'break'
   if (isAlarming(thread, now)) return 'blocked'
   if (thread.running) return 'working'
   if (thread.prState === 'MERGED') return 'celebrating'
@@ -113,6 +116,7 @@ const BADGE_FOR = {
   working: BADGE.working,
   celebrating: BADGE.done,
   sleeping: BADGE.none,
+  break: BADGE.none,
   idle: BADGE.none,
   spawning: BADGE.spawning,
   leaving: BADGE.leaving,
@@ -627,7 +631,9 @@ export class Colony {
     this._rebuildNavigation()
     for (const member of roster) {
       const entry = this.buildings.get(member.id)
-      member.site = this._workSite(this.plots.get(entry.plot), entry, entry.slot)
+      const plot = this.plots.get(entry.plot)
+      member.site =
+        member.status === 'break' ? this._breakSite(plot, member.id) : this._workSite(plot, entry, entry.slot)
     }
     this._syncFaunaSites()
     this.stats = { ...stats, done: stats.celebrating }
@@ -1099,6 +1105,58 @@ export class Colony {
     }) || this.nav?.nearestClear(site.x, site.z, PLOT_CELL * 2)
     if (free) site.set(free.x, 0, free.z)
     return site
+  }
+
+  /**
+   * Where a bot on a break sits: on open ground just off its own zone, on a heading of its own so
+   * two from one repo do not share a seat. Off every deck, dry, not on a rock and inside the
+   * walkable map. Kept per thread and zone footprint, so it does not shuffle seats every poll.
+   */
+  _breakSite(plot, id) {
+    const key = `${id}@${plot.signature}`
+    const seats = this.breakSeats || (this.breakSeats = new Map())
+    if (seats.has(key)) return seats.get(key).clone()
+    const middle = plot.middle || plot.center
+    const water = this.planet.water?.level
+    const decked = (x, z) => {
+      const c = worldToHex(x, z)
+      return this.deckedCells?.has(`${c.q},${c.r}`)
+    }
+    const fine = (x, z) => {
+      if (decked(x, z)) return false
+      const h = terrainHeight(x, z, this.planet)
+      if (water != null && h < water + 0.15) return false
+      // A floating island's edge drops into nothing: a seat has to be on the ground itself.
+      if (h < -1) return false
+      if (this.nav && (this.nav.isBlocked(x, z) || this.nav.insideKeep(x, z))) return false
+      return true
+    }
+    const base = ((hashString(id) % 628) / 100) % (Math.PI * 2)
+    let seat = null
+    for (let k = 0; k < 16 && !seat; k++) {
+      const a = base + k * 0.79
+      const dx = Math.cos(a)
+      const dz = Math.sin(a)
+      // Walk out of the zone, then a couple of metres further onto the grass.
+      let r = 1
+      while (r < 40 && decked(middle.x + dx * r, middle.z + dz * r)) r += 0.75
+      for (const extra of [2.5, 3.5, 5]) {
+        const x = middle.x + dx * (r + extra)
+        const z = middle.z + dz * (r + extra)
+        if (fine(x, z)) {
+          seat = new THREE.Vector3(x, 0, z)
+          break
+        }
+      }
+    }
+    // Nowhere obvious: the nearest walkable spot off the decks near the zone, or the zone itself.
+    if (!seat) {
+      const near = this.nav?.nearestClear(middle.x, middle.z, PLOT_CELL * 3, (x, z) => fine(x, z))
+      seat = near ? new THREE.Vector3(near.x, 0, near.z) : new THREE.Vector3(middle.x, 0, middle.z)
+    }
+    seats.set(key, seat)
+    if (seats.size > 200) seats.delete(seats.keys().next().value)
+    return seat.clone()
   }
 
   // ── per-frame ───────────────────────────────────────────────────────────────────────

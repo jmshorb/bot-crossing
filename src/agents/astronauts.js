@@ -5,7 +5,7 @@ import { buildFaceAtlas, FACE, FACE_LOOPS, FRAME_COLS, FRAME_ROWS } from './face
 import { animateFace } from './face-animation.js'
 import { attachMatrixAt, decorateSkinned, frameFor } from './crew.js'
 import { bendPoint, withCurve } from '../core/curve.js'
-import { Props, CHECK_LEN, CHECK_EVERY, pickProp } from './props.js'
+import { Props, CHECK_LEN, CHECK_EVERY, pickProp, DRINK_COLORS } from './props.js'
 import { projectHitPoint, bodyHitDistance } from './picking.js'
 import { helmetGeometry, visorGeometry, screenGeometry } from './model.js'
 import { CARRY_LIFT, grab, carryTo, followCarry, release, homeRunFactor, isAirborne, startFall, fallStep, FLAIL_RATE, stepCarryPose } from './carry.js'
@@ -80,6 +80,8 @@ const AGENT_LOOK = {
   celebrating: { trim: 0xc9a24f, eye: [2.9, 2.1, 0.6] },
   idle: { trim: 0x8b8b85, eye: [1.1, 1.5, 1.7] },
   sleeping: { trim: 0x5a5a70, eye: [0.7, 0.8, 1.4] },
+  // A warm amber, the colour of the drink most of them are holding.
+  break: { trim: 0xd9a441, eye: [1.6, 1.3, 0.8] },
   spawning: { trim: 0xc96442, eye: [2.4, 1.4, 0.7] },
   leaving: { trim: 0x6f7f75, eye: [1.0, 1.0, 1.1] },
 }
@@ -87,7 +89,7 @@ const AGENT_LOOK = {
 const WALK_SPEED = 2.1
 
 /** Who survives a display cap: the ones that want you, then the ones doing something. */
-const ROSTER_RANK = { blocked: 0, waiting: 1, working: 2, celebrating: 3, idle: 4, sleeping: 5 }
+const ROSTER_RANK = { blocked: 0, waiting: 1, working: 2, celebrating: 3, idle: 4, break: 5, sleeping: 6 }
 const rosterRank = (entry) => ROSTER_RANK[entry.status] ?? 6
 const TURN_RATE = 7.5
 /**
@@ -987,7 +989,7 @@ export class Astronauts {
           // velocity is a number only the animation reads, and what it says is "still
           // walking" for a third of a second after the astronaut has visibly stopped.
           agent.vel.set(0, 0, 0)
-          if (agent.status !== 'sleeping') this._faceToward(agent, agent.site, dt)
+          if (agent.status !== 'sleeping' && agent.status !== 'break') this._faceToward(agent, agent.site, dt)
           this._settle(agent, dt)
         }
         this._sitePose(agent, dt, elapsed, anim)
@@ -1265,7 +1267,7 @@ export class Astronauts {
     const push = this._separation(agent, this._sep)
     // Someone sitting is not going to elbow a neighbour aside: a gentle nudge is all, or
     // two sleepers in a tight spot trade shoves with a wall for ever.
-    if (agent.status === 'sleeping') {
+    if (agent.status === 'sleeping' || agent.status === 'break') {
       push.x *= 0.3
       push.z *= 0.3
     }
@@ -1487,6 +1489,7 @@ export class Astronauts {
         // Sitting down is a one-shot that hands over to the loop when it finishes, so an
         // agent that has just nodded off lowers itself rather than snapping into a sit.
         case 'sleeping':
+        case 'break':
           key = agent.clipKey === 'sit' ? 'sit' : 'sitDown'
           break
         default:
@@ -1608,6 +1611,10 @@ export class Astronauts {
           attachMatrixAt(rig, agent.frame, this.handSlot, bone)
           worn.multiplyMatrices(root, bone)
           setPart(child, worn, hammer, hands++, P.gripX, P.gripY, P.gripZ, P.gripRx, 0, P.gripRz)
+        }
+        // A drink, once a bot on a break has sat down.
+        if (agent.status === 'break' && agent.clipKey === 'sit') {
+          props.writeDrink(agent.pos, agent.yaw, agent.clipTime, DRINK_COLORS[hash(agent.id) % DRINK_COLORS.length], agent.suit)
         }
         // And whatever a checking astronaut has got out, in its left hand.
         if (agent.checkStart >= 0 && agent.clipKey.startsWith('phone') && elapsed - agent.checkStart < CHECK_LEN) {

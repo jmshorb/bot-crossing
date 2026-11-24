@@ -75,6 +75,8 @@ export const FACE_LOOPS = {
   // blocked astronaut wore the idle face.
   blocked: [FACE.error, FACE.error, FACE.sad, FACE.error],
   sleeping: [FACE.sleep],
+  // Off the clock: content, with the odd far-away look of somebody thinking about something else.
+  break: [FACE.happy, FACE.happy, FACE.think1, FACE.happy, FACE.love, FACE.happy],
 }
 
 export function buildFaceAtlas(size = 512) {

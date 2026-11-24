@@ -7,6 +7,7 @@ import { FACE, FRAME_COLS, FRAME_ROWS } from '../agents/faces.js'
 import { PLOT_PALETTE, hashString } from '../world/plots.js'
 import { FINDER_MENU_ORDER, FINDER_SWATCHES } from '../game/zone-colors.js'
 import { HARNESS_TINTS } from '../agents/astronauts.js'
+import { breakLabel, untilLabel } from '../game/breaks.js'
 import { DEFAULTS } from '../core/settings.js'
 
 /**
@@ -31,6 +32,7 @@ const IS_WIN = /Win/.test(navigator.platform)
 const FILE_MANAGER = IS_MAC ? 'Finder' : IS_WIN ? 'Explorer' : 'Files'
 
 const ICON = {
+  cup: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13v5a6 6 0 0 1-6 6h-1a6 6 0 0 1-6-6z"/><path d="M17 10h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 2.5c-.6.8-.6 1.7 0 2.5M12 2.5c-.6.8-.6 1.7 0 2.5"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
   eye: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
   eyeOff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.16 3.19M6.6 6.6C4.06 8.2 2 11 2 11s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24M2 2l20 20"/></svg>`,
@@ -59,6 +61,7 @@ const STAT_DEFS = [
   { key: 'waiting', label: 'need you', cls: 'waiting' },
   { key: 'blocked', label: 'blocked', cls: 'blocked' },
   { key: 'celebrating', label: 'shipped', cls: 'done' },
+  { key: 'break', label: 'on break', cls: 'break' },
   { key: 'agents', label: 'bots', cls: 'idle' },
 ]
 
@@ -525,6 +528,24 @@ export class Hud {
     on('#btn-open', 'click', () => this.actions.openThread?.())
     on('#btn-viewed', 'click', () => this.actions.markViewed?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
+    on('#btn-break', 'click', () => {
+      const t = this.selected?.thread
+      if (!t) return
+      if (t.onBreak || t.breakOver) this.actions.endBreak?.()
+      else this.toggleBreakForm(true)
+    })
+    on('.break-cancel', 'click', () => this.toggleBreakForm(false))
+    on('.break-quick', 'click', (e) => {
+      const q = e.target.closest('[data-quick]')?.dataset.quick
+      if (q) this.$('.break-until').value = q === 'none' ? '' : localInput(quickUntil(q))
+    })
+    on('.break-form', 'submit', (e) => {
+      e.preventDefault()
+      const value = this.$('.break-until').value
+      const until = value ? new Date(value).getTime() : 0
+      this.actions.takeBreak?.(this.$('.break-reason').value, Number.isFinite(until) ? until : 0)
+      this.toggleBreakForm(false)
+    })
     on('.thread-pop .title', 'dblclick', () => this.startRename())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-follow', 'click', () => this.settings.set('followSelected', !this.settings.get('followSelected')))
@@ -951,7 +972,10 @@ export class Hud {
     if (this.isPhone()) this.toggleSheet(false)
 
     if (!renaming) this.$('.thread-pop .title').textContent = thread.title || 'Untitled thread'
-    const status = STATUS_LABEL[agent.status] || agent.status
+    // A break keeps the short status in the tag and says what it is waiting for on a line of its
+    // own below — "Break's over — is Sam's CDN fix ready?" does not fit in a tag.
+    const parkedLine = breakLabel(thread)
+    const status = thread.breakOver ? "Break's over" : STATUS_LABEL[agent.status] || agent.status
     const meta = this.$('.thread-pop .meta')
     const bits = [
       `<span class="tag"><i class="swatch" style="background:${hex(agent.trim.getHex())}"></i>${escapeHtml(status)}</span>`,
@@ -963,6 +987,10 @@ export class Hud {
     if (thread.gitBranch) bits.push(`<span class="tag">${escapeHtml(thread.gitBranch)}</span>`)
     if (thread.model) bits.push(`<span class="tag">${escapeHtml(shortModel(thread.model))}</span>`)
     bits.push(`<span>${ago(thread.lastActivityAt)}</span>`)
+    if (parkedLine) {
+      const until = thread.onBreak?.until ? ` · ${escapeHtml(untilLabel(thread.onBreak.until))}` : ''
+      bits.push(`<span class="parked">${escapeHtml(parkedLine)}${until}</span>`)
+    }
     // Its swarm, by name, on a line of its own: the drones may be round the far side of the
     // building, and the names say what each one is for.
     const drones = this.actions.dronesFor?.(thread.id) || []
@@ -984,6 +1012,30 @@ export class Hud {
     // crowd the two that are always worth having, and "Viewed" on a thread that is not asking
     // for anything is a control with no effect.
     this.$('#btn-viewed').hidden = !thread.unread
+    const parked = Boolean(thread.onBreak || thread.breakOver)
+    this.$('#btn-break span').textContent = parked ? 'Back to work' : 'Take a break'
+    // A different bot, or this one now parked: whatever was being typed into the form is stale.
+    if (parked || this._breakFor !== thread.id) this.toggleBreakForm(false)
+    this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
+  }
+
+  /** Open the break form for the selected thread, blank, or close it. */
+  toggleBreakForm(open) {
+    const form = this.$('.break-form')
+    const t = this.selected?.thread
+    if (open && t) {
+      this._breakFor = t.id
+      this.$('.break-reason').value = ''
+      this.$('.break-until').value = ''
+      this.$('.break-until').min = localInput(Date.now())
+      form.hidden = false
+      this.$('.break-reason').focus()
+    } else {
+      this._breakFor = t?.id ?? null
+      form.hidden = true
+    }
+    const card = this.$('.thread-pop')
+    this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
   }
 
   /**
@@ -1391,6 +1443,23 @@ function cssFromGlow(color) {
   return `rgb(${enc(color.r)},${enc(color.g)},${enc(color.b)})`
 }
 
+/** A time as a `datetime-local` value, in this machine's own time zone. */
+function localInput(ms) {
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** The break form's shortcuts, as epoch ms. */
+function quickUntil(kind) {
+  const d = new Date()
+  if (kind === '3d') return d.getTime() + 3 * 86400000
+  if (kind === 'tomorrow') d.setDate(d.getDate() + 1)
+  if (kind === 'monday') d.setDate(d.getDate() + (((8 - d.getDay()) % 7) || 7))
+  d.setHours(9, 0, 0, 0)
+  return d.getTime()
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
@@ -1540,6 +1609,21 @@ const TEMPLATE = `
     <button class="btn" id="btn-viewed" title="Stop this thread asking for you until it moves on again (V)">${ICON.eye} Viewed</button>
     <button class="btn" id="btn-archive" title="Archive — this bot walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
+  <button class="btn ghost break-btn" id="btn-break" title="Park this thread while it waits on something outside the machine">${ICON.cup} <span>Take a break</span></button>
+  <form class="break-form" hidden>
+    <label>Waiting for <input class="break-reason" type="text" maxlength="120" placeholder="Sam's CDN fix (optional)" /></label>
+    <label>Until <input class="break-until" type="datetime-local" /></label>
+    <div class="break-quick">
+      <button type="button" class="btn ghost" data-quick="tomorrow">Tomorrow 9:00</button>
+      <button type="button" class="btn ghost" data-quick="3d">In 3 days</button>
+      <button type="button" class="btn ghost" data-quick="monday">Monday 9:00</button>
+      <button type="button" class="btn ghost" data-quick="none">No end</button>
+    </div>
+    <div class="break-go">
+      <button type="button" class="btn ghost break-cancel">Cancel</button>
+      <button type="submit" class="btn primary">Send off</button>
+    </div>
+  </form>
 </div>
 
 <div class="toasts"></div>

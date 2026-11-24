@@ -63,6 +63,7 @@ const emptyState = () => ({
   viewedAt: {},
   names: {},
   zoneColors: {},
+  breaks: {},
   settings: null,
   updatedAt: 0,
 })
@@ -81,6 +82,26 @@ const asNames = (v) =>
  * integer; `finder` is the Finder label (0–7) this colour was last synced as, which is how a
  * later scan tells a colour changed in Finder from one that simply has never been synced.
  */
+/**
+ * Threads you sent on a break, keyed by thread id: what they are waiting for (`reason`, may be
+ * empty), when to call them back (`until`, epoch ms, 0 for no end) and when the break began.
+ * Colony bookkeeping like `archived`: nothing reaches the harness, and the thread itself is
+ * untouched.
+ */
+const asBreaks = (v) =>
+  Object.fromEntries(
+    Object.entries(asObject(v))
+      .map(([id, b]) => [id, asObject(b)])
+      .filter(([id, b]) => id && Number.isFinite(Number(b.since)))
+      .map(([id, b]) => [
+        id,
+        {
+          reason: typeof b.reason === 'string' ? b.reason.trim().slice(0, 120) : '',
+          until: Number(b.until) > 0 ? Number(b.until) : 0,
+          since: Number(b.since),
+        },
+      ]),
+  )
 const asZoneColors = (v) =>
   Object.fromEntries(
     Object.entries(asObject(v))
@@ -103,6 +124,7 @@ async function readState() {
       viewedAt: asObject(raw.viewedAt),
       names: asNames(raw.names),
       zoneColors: asZoneColors(raw.zoneColors),
+      breaks: asBreaks(raw.breaks),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -140,6 +162,7 @@ async function writeState(next) {
     viewedAt: asObject(next.viewedAt),
     names: asNames(next.names),
     zoneColors: asZoneColors(next.zoneColors),
+    breaks: asBreaks(next.breaks),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }

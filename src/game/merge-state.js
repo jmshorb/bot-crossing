@@ -128,6 +128,7 @@ export function mergeState(base, local, remote) {
     viewedAt: mergeMap(b.viewedAt, l.viewedAt, r.viewedAt),
     names: mergeMap(b.names, l.names, r.names),
     zoneColors: mergeMap(b.zoneColors, l.zoneColors, r.zoneColors),
+    breaks: mergeMap(b.breaks, l.breaks, r.breaks),
     settings: l.settings && typeof l.settings === 'object' ? l.settings : r.settings ?? null,
   }
 }
