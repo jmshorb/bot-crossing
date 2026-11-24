@@ -737,6 +737,36 @@ test('an Antigravity orchestrator that has handed the work to a sub-agent is sti
   await fsp.rm(home, { recursive: true, force: true })
 })
 
+test('an Antigravity turn that has ended on a reply wants you; one you answered last, or old, does not', async () => {
+  const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'curate the library' }])
+  const at = (minsAgo) => new Date(Date.now() - minsAgo * 60e3).toISOString().replace('T', ' ')
+  const { DatabaseSync } = await import('node:sqlite')
+  const write = async (rows) => {
+    const file = path.join(home, 'conversation_summaries.db')
+    await fsp.rm(file, { force: true })
+    const idx = new DatabaseSync(file)
+    idx.exec(`CREATE TABLE conversation_summaries (conversation_id text PRIMARY KEY, title text, workspace_uris text,
+      status text, killed numeric, last_modified_time datetime, parent_conversation_id text, not_fully_idle numeric,
+      last_user_input_time datetime)`)
+    const ins = idx.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)')
+    for (const r of rows) ins.run(SESSION_ID, 'Library Curation Hub', '[]', r.status, r.updated, '', r.busy ? 1 : 0, r.input)
+    idx.close()
+  }
+  const scan = async () => (await (await antigravityWith(home)).scanThreads())[0]
+  // As the app left a real one: IDLE twelve minutes after you last wrote, on its question.
+  await write([{ status: 'CASCADE_RUN_STATUS_IDLE', updated: at(9), input: at(21) }])
+  let t = await scan()
+  assert.equal(t.running, false)
+  assert.equal(t.unread, true)
+  // Still running, or something left going in the background: working, not asking.
+  await write([{ status: 'CASCADE_RUN_STATUS_IDLE', updated: at(9), input: at(21), busy: true }])
+  assert.equal((await scan()).unread, false)
+  // A reply four days old is history; the bot sleeps rather than waving.
+  await write([{ status: 'CASCADE_RUN_STATUS_IDLE', updated: at(4 * 1440), input: at(4 * 1440 + 5) }])
+  assert.equal((await scan()).unread, false)
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
 test('an Antigravity swarm whose worker sits on an approval wants you, however long it has waited', async () => {
   const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'check the pages' }])
   const old = new Date(Date.now() - 45 * 60e3).toISOString().replace('T', ' ')
