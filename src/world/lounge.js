@@ -46,9 +46,20 @@ function inHex(lx, lz, r) {
   return Math.abs(lz) <= k && (Math.abs(lx) * Math.sqrt(3)) / 2 + Math.abs(lz) / 2 <= k
 }
 
+/**
+ * Where the palms stand, as [angle round the deck, distance from its middle, height, lean]. The
+ * four corners away from the bar, inset off the kerb: the loungers stop well short of them and
+ * the bar owns the corner on +X.
+ */
+const PALMS = [
+  [(Math.PI / 3) * 1, 5.9, 2.6, 0.32],
+  [(Math.PI / 3) * 2, 5.8, 2.2, 0.26],
+  [(Math.PI / 3) * 4, 5.9, 2.45, 0.36],
+  [(Math.PI / 3) * 5, 5.8, 2.05, 0.22],
+]
+
 const WOOD = 0xc89a63
 const BAMBOO = 0xd8b46a
-const THATCH = 0xb48a45
 
 export class Lounge {
   /**
@@ -96,7 +107,6 @@ export class Lounge {
     const tile = this._mat({ color: 0xf1ece2, roughness: 0.6 })
     const wood = this._mat({ color: WOOD, roughness: 0.75 })
     const bamboo = this._mat({ color: BAMBOO, roughness: 0.7 })
-    const thatch = this._mat({ color: THATCH, roughness: 0.95, flatShading: true })
     const cushion = this._mat({ color: 0xf4efe6, roughness: 0.9 })
     const stripe = this._mat({ color: 0x3fb6c9, roughness: 0.9 })
 
@@ -202,9 +212,7 @@ export class Lounge {
     for (const [px, pz] of [[-0.7, -1.5], [-0.7, 1.5], [0.8, -1.5], [0.8, 1.5]]) {
       this._add(new THREE.CylinderGeometry(0.06, 0.07, 2.3, 8), bamboo, bx + px, 1.15, pz)
     }
-    const roof = this._add(new THREE.ConeGeometry(2.4, 1.1, 4, 1), thatch, bx + 0.05, 2.75, 0)
-    roof.rotation.y = Math.PI / 4
-    roof.scale.set(1, 1, 1.35)
+    this._buildThatch(bx + 0.05, 2.2)
     for (const pz of [-0.7, 0.7]) {
       this._add(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 12), wood, bx - 0.85, 0.66, pz)
       this._add(new THREE.CylinderGeometry(0.04, 0.05, 0.64, 8), wood, bx - 0.85, 0.32, pz)
@@ -221,6 +229,15 @@ export class Lounge {
     }
     /** Where the bar is, locally, for picking. */
     this.barLocal = new THREE.Vector3(bx, 1.3, 0)
+
+    // A few small palms near the deck's corners, clear of the loungers, the bar and the pool.
+    this.palms = []
+    PALMS.forEach(([a, r, h, lean], i) => {
+      const x = Math.cos(a) * r
+      const z = Math.sin(a) * r
+      this._buildPalm(x, z, h, lean, i)
+      this.palms.push(new THREE.Vector3(x, 0, z))
+    })
   }
 
   /**
@@ -276,6 +293,88 @@ export class Lounge {
     roof.renderOrder = 3
     const apex = new THREE.Vector3(0, H + L.roofH, 0)
     for (let i = 0; i < 6; i++) bar(corner(i).setY(H), apex, 0.045)
+  }
+
+  /**
+   * The bar's roof: grass thatch rather than a smooth cone. Three overlapping tiers of straw, each
+   * a four-sided pyramid with its own ragged fringe of strands hanging off the eaves, and a bound
+   * topknot at the peak. The straw is one procedural texture laid down the slope, so the strands
+   * run the way rain would; the fringe is the same straw cut into uneven ends with alpha.
+   * `y` is the eaves' height, where the lowest tier's fringe starts.
+   */
+  _buildThatch(x, y) {
+    const straw = this._mat({ map: strawTexture(false), roughness: 0.95, side: THREE.DoubleSide, color: 0xffffff })
+    const fringe = this._mat({
+      map: strawTexture(true),
+      roughness: 0.95,
+      side: THREE.DoubleSide,
+      alphaTest: 0.5,
+      color: 0xffffff,
+    })
+    const tiers = [
+      { r: 2.5, h: 0.78, y: 0 },
+      { r: 1.85, h: 0.66, y: 0.42 },
+      { r: 1.2, h: 0.58, y: 0.8 },
+    ]
+    for (const t of tiers) {
+      const cone = this._add(new THREE.ConeGeometry(t.r, t.h, 4, 1, true), straw, x, y + t.y + t.h / 2, 0, Math.PI / 4)
+      cone.scale.set(1, 1, 1.35)
+      // The fringe: a short, slightly flared skirt just under the tier's edge.
+      const skirt = this._add(new THREE.CylinderGeometry(t.r * 0.99, t.r * 1.07, 0.34, 4, 1, true), fringe, x, y + t.y - 0.12, 0, Math.PI / 4)
+      skirt.scale.set(1, 1, 1.35)
+    }
+    // The topknot: a tight cone of straw and a band of twine round its base.
+    this._add(new THREE.ConeGeometry(0.42, 0.62, 8, 1), straw, x, y + 1.38 + 0.31, 0)
+    const band = this._add(new THREE.TorusGeometry(0.3, 0.05, 6, 16), this._mat({ color: 0x6b4a2a, roughness: 0.9 }), x, y + 1.46, 0)
+    band.rotation.x = Math.PI / 2
+  }
+
+  /**
+   * A small palm: a ringed trunk curving up out of a planter of sand, seven fronds drooping from
+   * the crown — each a strip bent into an arch and cut into leaflets by an alpha texture — and a
+   * cluster of coconuts. `lean` tips the trunk away from the deck's middle.
+   */
+  _buildPalm(x, z, h, lean, seed) {
+    const out = Math.atan2(z, x)
+    const ox = Math.cos(out) * lean
+    const oz = Math.sin(out) * lean
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x, 0, z),
+      new THREE.Vector3(x + ox * 0.15, h * 0.35, z + oz * 0.15),
+      new THREE.Vector3(x + ox * 0.55, h * 0.7, z + oz * 0.55),
+      new THREE.Vector3(x + ox, h, z + oz),
+    ])
+    const bark = this._mat({ color: 0x8a6a45, roughness: 0.95 })
+    this._add(new THREE.TubeGeometry(curve, 16, 0.085, 7, false), bark, 0, 0, 0)
+    // Rings where old fronds fell, so it reads as a palm trunk rather than a pole.
+    const ring = this._mat({ color: 0x6e5236, roughness: 0.95 })
+    for (let i = 1; i < 9; i++) {
+      const p = curve.getPoint(i / 9)
+      const t = curve.getTangent(i / 9)
+      const m = this._add(new THREE.TorusGeometry(0.095, 0.022, 5, 10), ring, p.x, p.y, p.z)
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), t)
+    }
+    // The planter: a low ring of sand-coloured stone round the trunk's foot.
+    this._add(new THREE.CylinderGeometry(0.42, 0.46, 0.16, 12), this._mat({ color: 0xcdb98f, roughness: 0.9 }), x, 0.08, z)
+    const top = curve.getPoint(1)
+    const leaf = this._mat({ map: frondTexture(), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.75, color: 0xffffff })
+    const fronds = 7
+    for (let i = 0; i < fronds; i++) {
+      const g = frondGeometry(1.25 + ((i * 37 + seed * 13) % 7) * 0.05)
+      this._geos.push(g)
+      const m = new THREE.Mesh(g, leaf)
+      m.position.copy(top)
+      m.rotation.order = 'YZX'
+      m.rotation.y = (i / fronds) * Math.PI * 2 + seed * 0.7
+      m.rotation.z = 0.25 + (i % 2) * 0.12
+      m.castShadow = true
+      this.group.add(m)
+    }
+    const nut = this._mat({ color: 0x5a3f22, roughness: 0.8 })
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + seed
+      this._add(new THREE.SphereGeometry(0.07, 8, 6), nut, top.x + Math.cos(a) * 0.1, top.y - 0.08, top.z + Math.sin(a) * 0.1)
+    }
   }
 
   _waterMaterial() {
@@ -357,6 +456,10 @@ export class Lounge {
     }
     const bar = toWorld(LOUNGE.barX, 0)
     out.push({ x: bar.x, z: bar.z, r: 1.4, keep: 1.4 })
+    for (const p of this.palms) {
+      const w = toWorld(p.x, p.z)
+      out.push({ x: w.x, z: w.z, r: 0.45, keep: 0.45 })
+    }
     return out
   }
 
@@ -403,4 +506,90 @@ function signTexture() {
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = THREE.SRGBColorSpace
   return t
+}
+
+/**
+ * Straw, as a texture: hundreds of thin strands in a spread of dry yellows and browns, running
+ * down the image (which is down the slope on a cone). With `fringe` the strands end raggedly
+ * partway down and everything below them is transparent — the hanging edge of a thatch tier.
+ */
+function strawTexture(fringe) {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 128
+  const g = c.getContext('2d')
+  if (!fringe) {
+    g.fillStyle = '#9c7838'
+    g.fillRect(0, 0, 256, 128)
+  }
+  const tones = ['#d8b768', '#c9a557', '#b8924a', '#e3c77e', '#a27c3c', '#8c6a32']
+  let seed = fringe ? 7 : 3
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  for (let i = 0; i < 900; i++) {
+    const x = rand() * 256
+    const len = fringe ? 40 + rand() * 85 : 128
+    g.strokeStyle = tones[Math.floor(rand() * tones.length)]
+    g.lineWidth = 0.8 + rand() * 1.6
+    g.beginPath()
+    g.moveTo(x, 0)
+    g.lineTo(x + (rand() - 0.5) * 6, len)
+    g.stroke()
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = THREE.RepeatWrapping
+  t.repeat.set(fringe ? 3 : 2, 1)
+  // Left at three's default flip: the canvas's top row lands at v = 1, which on a cylinder is its
+  // top edge, so a fringe's strands hang from the eaves with their ragged ends at the bottom.
+  return t
+}
+
+/** A palm frond's outline: a midrib with leaflets raking back along both sides, cut out by alpha. */
+function frondTexture() {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 64
+  const g = c.getContext('2d')
+  g.strokeStyle = '#3d7a2e'
+  g.lineCap = 'round'
+  for (let x = 8; x < 248; x += 7) {
+    const k = 1 - x / 256
+    const w = 6 + 24 * Math.sin(Math.min(1, (x / 256) * 1.4) * Math.PI * 0.9) * (0.4 + 0.6 * k)
+    g.strokeStyle = x % 14 ? '#4a8f36' : '#3f8030'
+    g.lineWidth = 3
+    for (const side of [-1, 1]) {
+      g.beginPath()
+      g.moveTo(x, 32)
+      g.lineTo(x + 12, 32 + side * w)
+      g.stroke()
+    }
+  }
+  g.strokeStyle = '#5a7a2a'
+  g.lineWidth = 3
+  g.beginPath()
+  g.moveTo(0, 32)
+  g.lineTo(256, 32)
+  g.stroke()
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
+
+/**
+ * A frond: a strip `length` long along +X from the crown, arched up a little and then drooping
+ * past its middle, its width tapering to the tip. The alpha texture does the leaflets.
+ */
+function frondGeometry(length) {
+  const geo = new THREE.PlaneGeometry(length, 0.62, 10, 1)
+  geo.rotateX(-Math.PI / 2)
+  const pos = geo.attributes.position
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getX(i) + length / 2) / length
+    pos.setX(i, t * length)
+    pos.setY(i, 0.22 * t - 0.75 * t * t)
+    pos.setZ(i, pos.getZ(i) * (1 - 0.55 * t))
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+  return geo
 }
