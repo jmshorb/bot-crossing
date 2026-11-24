@@ -720,6 +720,8 @@ export class Astronauts {
 
   _updateAgent(agent, entry) {
     agent.thread = entry.thread
+    // A bot waiting at the lounge keeps the roster's other news but not its site; see `_step`.
+    if (agent.waitHere) entry = { ...entry, site: null }
     agent.seatYaw = entry.seatYaw ?? null
     agent.drinkAt = entry.drinkAt ? entry.drinkAt.clone() : null
     agent.mingle = Boolean(entry.mingle)
@@ -915,6 +917,10 @@ export class Astronauts {
   }
 
   _step(agent, dt, elapsed, anim) {
+    // Waiting where it was put down: that spot is its site, whatever anything else says, until
+    // the wait is lifted. Pinned here every frame, because a working bot's round of its building
+    // and a roster pass both move `site` as a matter of course.
+    if (agent.waitHere && agent.waitAt && agent.state !== 'held') agent.site.copy(agent.waitAt)
     const fromX = agent.pos.x
     const fromZ = agent.pos.z
     agent.blocked = false
@@ -991,7 +997,12 @@ export class Astronauts {
       }
 
       case 'at-site': {
-        if (agent.status === 'idle' || (agent.status === 'break' && agent.mingle)) {
+        if (agent.waitHere) {
+          // Told to wait where it was put down — dropped at the lounge with the break form open.
+          // Whatever its status would have it do, it stands still until that is decided.
+          agent.vel.set(0, 0, 0)
+          this._settle(agent, dt)
+        } else if (agent.status === 'idle' || (agent.status === 'break' && agent.mingle)) {
           // Idlers potter around their plot, and `_drift` owns their velocity outright. So does
           // a guest with no lounger, round the pool deck.
           this._drift(agent, dt, elapsed)

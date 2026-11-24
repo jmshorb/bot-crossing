@@ -342,6 +342,15 @@ const actions = {
   takeBreak: (reason, until) => {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
+    if (thread.running) {
+      hud.toast('It is working right now — a break would end itself straight away', 'err')
+      releaseLoungeDrop()
+      return
+    }
+    // A bot waiting at the lounge for this form is free to go to its lounger now.
+    const waiting = loungeDrop && colony.agentFor(loungeDrop)
+    if (waiting) waiting.waitHere = false
+    loungeDrop = null
     const clean = String(reason || '').trim().slice(0, 120)
     // A drink of its own, poured now and kept for the whole break, unlike the ones already out.
     const drink = pickDrinkColor(Object.values(state.breaks || {}).map((b) => b.drink))
@@ -353,6 +362,9 @@ const actions = {
     applyThreads(threads)
     hud.toast(clean ? `Off for a break — dreaming about ${clean.slice(0, 40)}` : 'Off for a break')
   },
+
+  /** The break form was closed without Send off. */
+  breakFormCancelled: () => releaseLoungeDrop(),
 
   /** Back to work for any guest at the tiki bar, selected or not. */
   endBreakFor: (id) => {
@@ -984,13 +996,54 @@ function carryAgent(e) {
 }
 
 function endAgentDrag() {
-  colony.astronauts.release(drag.agent)
+  const agent = drag.agent
+  colony.astronauts.release(agent)
+  dropOnLounge(agent)
   const pending = drag.pendingThreads
   drag.lifted = false
   drag.agent = null
   drag.pendingThreads = null
   if (pending) applyThreads(pending)
   engine.canvas.style.cursor = 'grab'
+}
+
+/**
+ * A bot let go over the lounge is being sent on a break: select it, open its card with the break
+ * form already showing, and keep it standing where it was dropped while you fill the form in.
+ * Send off puts it on a lounger; Cancel, or closing the card, lets it walk home as any dropped
+ * bot does. One already on a break simply goes back to its lounger.
+ */
+let loungeDrop = null
+function dropOnLounge(agent) {
+  if (!agent || !colony.lounge?.contains(agent.pos.x, agent.pos.z)) return
+  const thread = threads.find((t) => t.id === agent.id)
+  if (!thread || thread.onBreak || thread.parentId) return
+  // A break ends itself the moment its thread is working, so one that is working now cannot
+  // take one: say so, and let it go home rather than open a form that would undo itself.
+  if (thread.running) {
+    hud.toast(`${thread.title.slice(0, 40)} is working right now — breaks are for threads waiting on something`)
+    return
+  }
+  select(agent.id, {})
+  // Hold it here. The roster keeps handing over the same home site, which the bot only acts on
+  // when it differs from the one it was last given — so moving the site, and leaving that
+  // memory alone, keeps it standing here until the form is sent or let go.
+  agent.site.copy(agent.pos)
+  agent.waitAt = agent.pos.clone()
+  agent.waitHere = true
+  loungeDrop = agent.id
+  hud.toggleBreakForm(true)
+}
+
+/** The break form closed without sending anybody: a bot dropped at the lounge goes home. */
+function releaseLoungeDrop() {
+  if (!loungeDrop) return
+  const agent = colony.agentFor(loungeDrop)
+  loungeDrop = null
+  if (agent) agent.waitHere = false
+  // Forget the site it was last handed, so the next roster pass hands home back and it goes.
+  if (agent?.given) agent.given.set(NaN, 0, NaN)
+  applyThreads(threads)
 }
 
 function liftPlot() {

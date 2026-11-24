@@ -29,6 +29,8 @@
 >   loungers, palms and a thatched tiki bar, and lie back with a daiquiri in a random bright
 >   colour under an umbrella in their own suit colour. Click the tiki bar (or the "on break"
 >   count) for the guest list. On Luna, Mars, Frost and Cinder it is under a glass enclosure.
+>   Or drag a bot onto the lounge: it waits there with its break form open, and walks home if
+>   you cancel.
 >
 > All but the Finder sync, the drones, breaks and the lounge have been offered upstream as pull requests
 > ([#110](https://github.com/Station-Sciences/bot-crossing/pull/110),

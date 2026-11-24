@@ -545,7 +545,7 @@ export class Hud {
       const value = this.$('.break-until').value
       const until = value ? new Date(value).getTime() : 0
       this.actions.takeBreak?.(this.$('.break-reason').value, Number.isFinite(until) ? until : 0)
-      this.toggleBreakForm(false)
+      this.toggleBreakForm(false, { sent: true })
     })
     on('.thread-pop .title', 'dblclick', () => this.startRename())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
@@ -964,6 +964,7 @@ export class Hud {
     if (this._rename && !renaming) this._rename.finish(false)
     if (!agent || !thread) {
       card.classList.remove('on')
+      if (!this.$('.break-form').hidden) this.toggleBreakForm(false)
       this.selected = null
       return
     }
@@ -1073,9 +1074,11 @@ export class Hud {
   }
 
   /** Open the break form for the selected thread, blank, or close it. */
-  toggleBreakForm(open) {
+  toggleBreakForm(open, { sent = false } = {}) {
     const form = this.$('.break-form')
     const t = this.selected?.thread
+    // Closing a form that was open, without sending: whoever was waiting on it is let go.
+    if (!open && !sent && !form.hidden) this.actions.breakFormCancelled?.()
     if (open && t) {
       this._breakFor = t.id
       this.$('.break-reason').value = ''
