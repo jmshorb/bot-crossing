@@ -26,7 +26,7 @@ import {
   setFinderColor,
 } from './game/api.js'
 import { FINDER_SWATCHES, nearestFinderColor, reconcileZoneColor } from './game/zone-colors.js'
-import { applyBreaks, pickDrinkColor } from './game/breaks.js'
+import { applyBreaks, pickDrinkColor, breakLabel, untilLabel } from './game/breaks.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { ACTIVE, JumpRun, NEEDS_YOU, busiestOrder, crewOrder, inScope, needsYouOrder, nextInRing } from './game/jumps.js'
@@ -141,6 +141,11 @@ const actions = {
    * button, jumps to. Always the whole colony: the pills count the whole colony.
    */
   focusStatus: (status) => {
+    // The "on break" counter opens the tiki bar rather than hopping from lounger to lounger.
+    if (status === 'break') {
+      openTiki()
+      return
+    }
     const keys = status === 'agents' ? null : Array.isArray(status) ? status : [status]
     const qualifies = (c) => !keys || keys.includes(c.status)
     const rank = keys ? needsYouOrder : (list) => crewOrder(list, projectOrder())
@@ -347,6 +352,14 @@ const actions = {
     queueSave()
     applyThreads(threads)
     hud.toast(clean ? `Off for a break — dreaming about ${clean.slice(0, 40)}` : 'Off for a break')
+  },
+
+  /** Back to work for any guest at the tiki bar, selected or not. */
+  endBreakFor: (id) => {
+    if (!id || !(state.breaks || {})[id]) return
+    const t = threads.find((x) => x.id === id)
+    dropBreak(id)
+    hud.toast(`${(t?.title || 'Back').slice(0, 40)} — back to work`)
   },
 
   /** Back to work: the bot gets up and walks back to its building. */
@@ -772,7 +785,7 @@ engine.canvas.addEventListener('pointermove', (e) => {
   colony.setHoveredPlot(plot)
   // A plot is grabbable as well as clickable, so it gets the hand rather than the finger:
   // 'pointer' promised only a click and hid the hold-to-drag entirely.
-  engine.canvas.style.cursor = agent ? 'pointer' : 'grab'
+  engine.canvas.style.cursor = agent || colony.pickBar(p.x, p.y, p.aspect) ? 'pointer' : 'grab'
 })
 
 /**
@@ -1105,6 +1118,11 @@ engine.canvas.addEventListener('pointerup', (e) => {
     select(agent.id, {})
     return
   }
+  // The tiki bar: who is on a break, and what they are waiting for.
+  if (colony.pickBar(p.x, p.y, p.aspect)) {
+    hud.toggleTiki(true)
+    return
+  }
   // Nobody there: whoever was selected is put down first, whatever else the click lands on
   // — a deck of the same repo used to keep the card up. Then a zone's deck or its name plate
   // opens that repo's sidebar, and bare ground closes that too.
@@ -1247,6 +1265,10 @@ window.addEventListener('keydown', (e) => {
     // One step at a time, outward: the drag in hand, the thread, then the zone.
     case 'Escape':
       if (hud.closeSearch()) break
+      if (hud.tikiOpen) {
+        hud.toggleTiki(false)
+        break
+      }
       if (drag.lifted || drag.timer) {
         cancelHold()
         if (drag.lifted) {
@@ -1324,6 +1346,7 @@ function applyThreads(list) {
   restoring.clear()
 
   const stats = colony.setThreads(list, archivedSet, hiddenSet, known)
+  hud.setTikiGuests(tikiGuests())
   hud.setStats(stats)
   chimeForNewWaiting(list, archivedSet, hiddenSet)
 
@@ -1411,6 +1434,42 @@ const finderPending = new Set()
 /** Off on anything but macOS, and once the server has said so; on there unless you turn it off. */
 let finderSupported = /Mac/.test(navigator.platform)
 const finderSyncOn = () => finderSupported && settings.get('finderTags')
+
+/** Everyone on a break, for the tiki bar: longest-waiting first. */
+function tikiGuests() {
+  const now = Date.now()
+  return threads
+    .filter((t) => t.onBreak && !t.archived)
+    .map((t) => {
+      const b = (state.breaks || {})[t.id] || {}
+      return {
+        id: t.id,
+        title: t.title || 'Untitled thread',
+        project: t.project || '',
+        label: breakLabel(t),
+        until: untilLabel(t.onBreak.until),
+        since: shortAgo(now - (b.since || now)),
+        sinceAt: b.since || now,
+        drink: t.onBreak.drink,
+      }
+    })
+    .sort((a, b) => a.sinceAt - b.sinceAt)
+}
+
+function shortAgo(ms) {
+  const m = Math.round(ms / 60000)
+  if (m < 60) return `${Math.max(1, m)}m`
+  const h = Math.round(m / 60)
+  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`
+}
+
+/** Open the tiki bar's guest list and fly over to the pool. */
+function openTiki() {
+  hud.setTikiGuests(tikiGuests())
+  hud.toggleTiki(true)
+  const bar = colony.lounge?.barWorld()
+  if (bar) rig.focus(new THREE.Vector3(bar.x, 0, bar.z), { distance: Math.min(rig.desiredDistance, 30) })
+}
 
 function dropBreak(id) {
   const breaks = { ...(state.breaks || {}) }

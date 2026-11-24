@@ -26,6 +26,7 @@ import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.
 import { Ship } from '../world/ship.js'
 import { Astronauts, harnessTint } from '../agents/astronauts.js'
 import { ErrandDrones } from '../agents/errand-drones.js'
+import { Lounge, LOUNGE, DOMED_PLANETS } from '../world/lounge.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
 import { MAX_AGENT_CAP } from '../core/settings.js'
 import { Particles } from '../agents/particles.js'
@@ -400,7 +401,12 @@ export class Colony {
       this.worldGroup.remove(this.scatterGroup)
       disposeTree(this.scatterGroup)
     }
+    this._placeLounge()
     const clear = []
+    if (this.lounge) {
+      const r = this.lounge.dome ? LOUNGE.domeRX + 1 : LOUNGE.radius + 1
+      clear.push({ x: this.lounge.center.x, z: this.lounge.center.z, r })
+    }
     for (const plot of this.plotOrder) {
       for (const local of plot.localCenters) {
         clear.push({ x: plot.center.x + local.x, z: plot.center.z + local.z, r: 8.6 })
@@ -432,6 +438,7 @@ export class Colony {
       heightAt: (x, z) => terrainHeight(x, z, this.planet),
       blocked: (x, z) => !this.onIsland(x, z) ||
         this.plotOrder.some((plot) => plot.containsWorld(x, z, -0.4)) ||
+        Boolean(this.lounge?.contains(x, z, 0.4)) ||
         (apron && (x - apron.x) ** 2 + (z - apron.z) ** 2 < apron.r * apron.r),
       density: this.settings.get('scatterDensity'),
       quality: detail === 'high' ? 'high' : detail === 'low' ? 'low' : 'medium',
@@ -441,7 +448,119 @@ export class Colony {
 
   /** What the scatter has to avoid, as one string — cheap to compare every poll. */
   _plotFootprint() {
-    return this.plotOrder.map((plot) => plot.signature).join('|')
+    return this.plotOrder.map((plot) => plot.signature).join('|') + `|lounge:${this._loungeSpot()?.key ?? ''}`
+  }
+
+  /**
+   * Where the lounge goes: on open, dry ground near the lander, off every zone with a metre to
+   * spare, with its bar end turned away from the ship. The spot it already has wins while it is
+   * still good, so the pool only moves when a zone grows into it or the planet changes. Null when
+   * there is nowhere — a small island, say — and bots on a break sit by their own zone instead.
+   */
+  _loungeSpot() {
+    const ship = shipPosition()
+    const water = this.planet.water?.level
+    // A domed lounge stands on a wider plinth, so it needs more open ground round it.
+    const R = DOMED_PLANETS.has(this.planet.id) ? LOUNGE.domeRX + 0.6 : LOUNGE.radius
+    const ok = (cx, cz) => {
+      if (Math.hypot(cx - ship.x, cz - ship.z) < R + 6) return false
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2
+        for (const r of [0, R * 0.5, R]) {
+          const x = cx + Math.cos(a) * r
+          const z = cz + Math.sin(a) * r
+          if (!this.onIsland(x, z)) return false
+          if (this.plotOrder.some((plot) => plot.containsWorld(x, z, 1))) return false
+          const h = terrainHeight(x, z, this.planet)
+          if (h < -1 || (water != null && h < water + 0.25)) return false
+        }
+      }
+      return true
+    }
+    const keep = this._loungeAt
+    let spot = keep && keep.planet === this.planet.id && ok(keep.x, keep.z) ? keep : null
+    if (!spot) {
+      const away = Math.atan2(ship.z, ship.x)
+      search: for (let r = R + 7; r < 70; r += 2.5) {
+        for (let k = 0; k < 28; k++) {
+          // Fan out from the side of the ship away from the colony's middle, alternating sides.
+          const a = away + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 14)
+          const x = ship.x + Math.cos(a) * r
+          const z = ship.z + Math.sin(a) * r
+          if (ok(x, z)) {
+            spot = { x, z, planet: this.planet.id }
+            break search
+          }
+        }
+      }
+    }
+    if (!spot) return null
+    spot.key = `${spot.planet}:${spot.x.toFixed(1)},${spot.z.toFixed(1)}`
+    this._loungeAt = spot
+    return spot
+  }
+
+  /** Build or move the lounge to match `_loungeSpot`. */
+  _placeLounge() {
+    const spot = this._loungeSpot()
+    if (this.lounge && spot && this.lounge.key === spot.key) return
+    this.lounge?.dispose()
+    this.lounge = null
+    if (!spot) return
+    const ship = shipPosition()
+    const ux = spot.x - ship.x
+    const uz = spot.z - ship.z
+    // The bar (local +X) faces away from the lander.
+    const angle = Math.atan2(-uz, ux)
+    let top = -Infinity
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2
+      for (const r of [0, 2.5, 5, 6.5, 8.4]) top = Math.max(top, terrainHeight(spot.x + Math.cos(a) * r, spot.z + Math.sin(a) * r, this.planet))
+    }
+    this.lounge = new Lounge(new THREE.Vector3(spot.x, 0, spot.z), angle, top + LOUNGE.lift, {
+      dome: DOMED_PLANETS.has(this.planet.id),
+    })
+    this.lounge.key = spot.key
+    this.scene.add(this.lounge.group)
+  }
+
+  /**
+   * A lounger for each thread on a break, kept for as long as it stays on one. Threads beyond the
+   * eight loungers get nothing here and sit by their own zone instead.
+   */
+  _loungeSeat(id, onBreak) {
+    const seats = this.loungeSeats || (this.loungeSeats = new Map())
+    for (const key of [...seats.keys()]) if (!onBreak.has(key)) seats.delete(key)
+    if (!this.lounge || id == null) return null
+    if (!seats.has(id)) {
+      const used = new Set(seats.values())
+      for (let i = 0; i < this.lounge.seatCount; i++) {
+        if (!used.has(i)) {
+          seats.set(id, i)
+          break
+        }
+      }
+    }
+    return seats.has(id) ? this.lounge.seat(seats.get(id)) : null
+  }
+
+  /** The thread ids on a break, as the roster has them. */
+  get loungeGuests() {
+    return [...(this.loungeSeats?.keys() || [])]
+  }
+
+  /** Whether the pointer is on the tiki bar. Projected like a drone: through the world curve. */
+  pickBar(ndcX, ndcY, aspect) {
+    if (!this.lounge) return false
+    const cam = this.camera
+    const v = bendPoint(this.lounge.barWorld(this._barV || (this._barV = new THREE.Vector3()))).applyMatrix4(cam.matrixWorldInverse)
+    const depth = -v.z
+    if (depth <= cam.near) return false
+    const r = 1.9 / (depth * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2))
+    v.applyMatrix4(cam.projectionMatrix)
+    const dx = (ndcX - v.x) * aspect
+    const dy = ndcY - v.y
+    return dx * dx + dy * dy <= r * r
   }
 
   /**
@@ -629,12 +748,19 @@ export class Colony {
     this.urgentPlots = urgent
     this.activePlots = active
     this._rebuildNavigation()
+    const onBreak = new Set(roster.filter((m) => m.status === 'break').map((m) => m.id))
     for (const member of roster) {
       const entry = this.buildings.get(member.id)
       const plot = this.plots.get(entry.plot)
-      member.site =
-        member.status === 'break' ? this._breakSite(plot, member.id) : this._workSite(plot, entry, entry.slot)
+      if (member.status === 'break') {
+        // A lounger at the pool if one is free, else a patch of grass by its own zone.
+        const seat = this._loungeSeat(member.id, onBreak)
+        member.site = seat ? seat.pos : this._breakSite(plot, member.id)
+        member.seatYaw = seat ? seat.yaw : null
+        member.drinkAt = seat ? seat.table : null
+      } else member.site = this._workSite(plot, entry, entry.slot)
     }
+    if (!roster.some((m) => m.status === 'break')) this._loungeSeat(null, onBreak)
     this._syncFaunaSites()
     this.stats = { ...stats, done: stats.celebrating }
     this.astronauts.setRoster(roster, this._world())
@@ -731,6 +857,7 @@ export class Colony {
   groundAt(x, z) {
     const cell = worldToHex(x, z)
     if (this.deckedCells?.has(`${cell.q},${cell.r}`)) return DECK_TOP
+    if (this.lounge?.contains(x, z)) return this.lounge.deckY
     return terrainHeight(x, z, this.planet)
   }
 
@@ -888,6 +1015,10 @@ export class Colony {
         // as one through a wall, just smaller.
         obstacles.push({ x: mat.elements[12], z: mat.elements[14], r: r + TRAVEL_RADIUS, keep: r + AGENT_RADIUS + 0.1 })
       }
+    }
+    // The pool and the bar: walked round, never through.
+    for (const o of this.lounge?.obstacles() || []) {
+      obstacles.push({ x: o.x, z: o.z, r: o.r + TRAVEL_RADIUS, keep: o.keep + AGENT_RADIUS })
     }
 
     // Scaffold poles. They stand just outside the building's own keep radius, exactly
@@ -1188,6 +1319,7 @@ export class Colony {
       this.island.setDaylight(this.sky.dayFactor ?? 1)
     }
     this.rock?.update(dt, elapsed)
+    this.lounge?.update(elapsed, night)
     this.fauna.update(dt, elapsed, this.camera, night, this._faunaHooks || (this._faunaHooks = {
       ripple: (x, z, s) => this.ripple(x, z, s),
       sound: (name, x, y, z) => this.onSound?.(name, x, y, z),

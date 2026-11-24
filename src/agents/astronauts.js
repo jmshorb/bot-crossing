@@ -89,6 +89,10 @@ const AGENT_LOOK = {
 const WALK_SPEED = 2.1
 
 /** Who survives a display cap: the ones that want you, then the ones doing something. */
+/** Lying on a lounger: how far back the sitting pose tips, and how high the cushion is. */
+const LOUNGE_RECLINE = 0.55
+const LOUNGE_SEAT_Y = 0.3
+
 const ROSTER_RANK = { blocked: 0, waiting: 1, working: 2, celebrating: 3, idle: 4, break: 5, sleeping: 6 }
 const rosterRank = (entry) => ROSTER_RANK[entry.status] ?? 6
 const TURN_RATE = 7.5
@@ -621,6 +625,9 @@ export class Astronauts {
       thread: entry.thread,
       status: entry.status,
       site: entry.site ? entry.site.clone() : new THREE.Vector3(),
+      // On a lounger at the pool: the way it lies, and the table its drink stands on.
+      seatYaw: entry.seatYaw ?? null,
+      drinkAt: entry.drinkAt ? entry.drinkAt.clone() : null,
       // The thing being worked on, and where round it this astronaut is standing to do it.
       anchor: entry.anchor ? entry.anchor.clone() : null,
       workSpot: new THREE.Vector3(),
@@ -710,6 +717,8 @@ export class Astronauts {
 
   _updateAgent(agent, entry) {
     agent.thread = entry.thread
+    agent.seatYaw = entry.seatYaw ?? null
+    agent.drinkAt = entry.drinkAt ? entry.drinkAt.clone() : null
     if (entry.site) {
       // Measured against the site the roster last handed over, not the one being stood at:
       // an astronaut that gave up on an unreachable site and adopted the ground it reached
@@ -989,8 +998,16 @@ export class Astronauts {
           // velocity is a number only the animation reads, and what it says is "still
           // walking" for a third of a second after the astronaut has visibly stopped.
           agent.vel.set(0, 0, 0)
-          if (agent.status !== 'sleeping' && agent.status !== 'break') this._faceToward(agent, agent.site, dt)
-          this._settle(agent, dt)
+          if (agent.status === 'break' && agent.seatYaw !== null) {
+            // On a lounger: lie the way the lounger points, and stay put — the loungers are
+            // already spaced, and a nudge from a neighbour would slide it off onto the deck.
+            agent.targetYaw = agent.seatYaw
+            agent.pos.x = THREE.MathUtils.damp(agent.pos.x, agent.site.x, 6, dt)
+            agent.pos.z = THREE.MathUtils.damp(agent.pos.z, agent.site.z, 6, dt)
+          } else {
+            if (agent.status !== 'sleeping' && agent.status !== 'break') this._faceToward(agent, agent.site, dt)
+            this._settle(agent, dt)
+          }
         }
         this._sitePose(agent, dt, elapsed, anim)
         break
@@ -1580,6 +1597,14 @@ export class Astronauts {
         const girth = base / Math.sqrt(stretch)
         root.compose(v, q, _poseS.set(girth, base * stretch, girth))
       } else {
+        // Lying back on a lounger: the sitting pose, lifted onto the cushion and tipped back
+        // against the backrest. There is no lying-down clip in the rig; this reads as one.
+        const lounging = agent.status === 'break' && agent.seatYaw !== null && agent.clipKey === 'sit' && agent.state === 'at-site'
+        if (lounging) {
+          const k = Math.min(1, agent.clipTime / 0.8)
+          q.multiply(_poseQ.setFromEuler(_poseE.set(-LOUNGE_RECLINE * k, 0, 0)))
+          v.y += LOUNGE_SEAT_Y * k
+        }
         root.compose(v, q, one.setScalar(base))
         one.setScalar(1)
       }
@@ -1617,7 +1642,9 @@ export class Astronauts {
           // The colour poured when the break began; a break saved before drinks were random
           // falls back to a flavour picked off the bot's id.
           const drink = agent.thread?.onBreak?.drink ?? DRINK_COLORS[hash(agent.id) % DRINK_COLORS.length]
-          props.writeDrink(agent.pos, agent.yaw, agent.clipTime, drink, agent.suit)
+          // On the side table by its lounger, or on the ground beside it anywhere else.
+          if (agent.drinkAt) props.writeDrink(agent.drinkAt, agent.yaw, agent.clipTime, drink, agent.suit, false)
+          else props.writeDrink(agent.pos, agent.yaw, agent.clipTime, drink, agent.suit)
         }
         // And whatever a checking astronaut has got out, in its left hand.
         if (agent.checkStart >= 0 && agent.clipKey.startsWith('phone') && elapsed - agent.checkStart < CHECK_LEN) {

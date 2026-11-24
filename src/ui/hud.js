@@ -535,6 +535,7 @@ export class Hud {
       else this.toggleBreakForm(true)
     })
     on('.break-cancel', 'click', () => this.toggleBreakForm(false))
+    on('.tiki-close', 'click', () => this.toggleTiki(false))
     on('.break-quick', 'click', (e) => {
       const q = e.target.closest('[data-quick]')?.dataset.quick
       if (q) this.$('.break-until').value = q === 'none' ? '' : localInput(quickUntil(q))
@@ -1017,6 +1018,58 @@ export class Hud {
     // A different bot, or this one now parked: whatever was being typed into the form is stale.
     if (parked || this._breakFor !== thread.id) this.toggleBreakForm(false)
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
+  }
+
+  /**
+   * The tiki bar's guest list: every thread on a break, what it is waiting for and until when.
+   * A row picks that bot; "Back to work" sends it straight back to its building. Kept current
+   * while open, because a poll can end a break (the thread started running) under it.
+   */
+  setTikiGuests(guests) {
+    this._tikiGuests = guests
+    if (!this.$('.tiki').hidden) this._renderTiki()
+  }
+
+  toggleTiki(open = this.$('.tiki').hidden) {
+    const panel = this.$('.tiki')
+    panel.hidden = !open
+    if (open) this._renderTiki()
+  }
+
+  get tikiOpen() {
+    return !this.$('.tiki').hidden
+  }
+
+  _renderTiki() {
+    const guests = this._tikiGuests || []
+    this.$('.tiki-count').textContent = guests.length ? `${guests.length} waiting` : ''
+    const list = this.$('.tiki-list')
+    list.innerHTML = ''
+    if (!guests.length) {
+      list.innerHTML = '<div class="tiki-empty">Nobody on a break. Send one from its card with “Take a break”.</div>'
+      return
+    }
+    for (const g of guests) {
+      const row = document.createElement('div')
+      row.className = 'tiki-row'
+      const pick = document.createElement('button')
+      pick.type = 'button'
+      pick.className = 'tiki-pick'
+      pick.title = 'Select this bot'
+      pick.innerHTML =
+        `<i class="swatch" style="background:${hex(g.drink ?? 0xe2b45c)};color:${hex(g.drink ?? 0xe2b45c)}"></i>` +
+        `<span class="tiki-text"><span class="tiki-name">${escapeHtml(g.title)}</span>` +
+        `<span class="tiki-why">${escapeHtml(g.label)}</span>` +
+        `<span class="tiki-meta">${escapeHtml(g.project)} · on break ${escapeHtml(g.since)}${g.until ? ` · ${escapeHtml(g.until)}` : ''}</span></span>`
+      pick.addEventListener('click', () => this.actions.select?.(g.id))
+      const back = document.createElement('button')
+      back.type = 'button'
+      back.className = 'btn ghost tiki-back'
+      back.textContent = 'Back to work'
+      back.addEventListener('click', () => this.actions.endBreakFor?.(g.id))
+      row.append(pick, back)
+      list.appendChild(row)
+    }
   }
 
   /** Open the break form for the selected thread, blank, or close it. */
@@ -1629,6 +1682,14 @@ const TEMPLATE = `
 <div class="toasts"></div>
 <div class="fps panel"></div>
 <div class="hint-pill panel"></div>
+<div class="tiki panel" role="dialog" aria-label="Tiki bar guests" hidden>
+  <div class="tiki-head">
+    <span class="tiki-title">${ICON.cup} Tiki bar</span>
+    <span class="tiki-count"></span>
+    <button class="btn icon ghost tiki-close" title="Close (Esc)">${ICON.close}</button>
+  </div>
+  <div class="tiki-list"></div>
+</div>
 <div class="finder panel" role="dialog" aria-label="Find a thread" hidden>
   <input class="finder-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find a thread in this repo…" aria-label="Find a thread" />
   <div class="finder-list" role="listbox"></div>

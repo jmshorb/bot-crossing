@@ -184,14 +184,18 @@ export class Props {
    * since it sat down (the glass grows in over the first moment), `color` the drink's and
    * `umbrella` the bot's own suit colour.
    */
-  writeDrink(pos, yaw, t, color, umbrella) {
+  writeDrink(pos, yaw, t, color, umbrella, beside = true) {
     if (this._nDrink >= this.capacity) return
     const i = this._nDrink++
     const k = Math.max(0.001, smooth(t / DRINK.out))
     const sin = Math.sin(yaw)
     const cos = Math.cos(yaw)
     // The bot faces +Z in its own frame, so its left is +X turned by the yaw.
-    this._v.set(pos.x + DRINK.side * cos + DRINK.ahead * sin, pos.y, pos.z - DRINK.side * sin + DRINK.ahead * cos)
+    // `beside` puts it at the bot's left on the ground; otherwise `pos` is exactly where it stands
+    // (a lounger's side table).
+    const side = beside ? DRINK.side : 0
+    const ahead = beside ? DRINK.ahead : 0
+    this._v.set(pos.x + side * cos + ahead * sin, pos.y, pos.z - side * sin + ahead * cos)
     this._e.set(0, yaw + 0.6, 0)
     this._q.setFromEuler(this._e)
     this._m.compose(this._v, this._q, this._s.setScalar(k))
