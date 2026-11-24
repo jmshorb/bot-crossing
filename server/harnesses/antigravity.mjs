@@ -144,7 +144,7 @@ async function summaries(home) {
       // Private state that drifts between versions: probe the columns before naming them.
       const cols = new Set(handle.prepare(`PRAGMA table_info(conversation_summaries)`).all().map((r) => r.name))
       if (cols.has('conversation_id')) {
-        const want = ['title', 'workspace_uris', 'status', 'killed', 'last_modified_time', 'parent_conversation_id']
+        const want = ['title', 'workspace_uris', 'status', 'killed', 'last_modified_time', 'parent_conversation_id', 'agent_name']
         const pick = want.filter((c) => cols.has(c))
         const sql = `SELECT conversation_id${pick.map((c) => `, ${c}`).join('')} FROM conversation_summaries`
         for (const r of handle.prepare(sql).all()) {
@@ -156,6 +156,8 @@ async function summaries(home) {
             killed: Boolean(Number(r.killed)),
             updatedAt: timeOf(r.last_modified_time),
             child: Boolean(r.parent_conversation_id),
+            parent: typeof r.parent_conversation_id === 'string' ? r.parent_conversation_id : '',
+            agent: clean(r.agent_name),
           })
         }
       }
@@ -300,6 +302,24 @@ async function awaitingApproval(home, id) {
 const RUNNING_STATUS = /RUNNING|BUSY|ACTIVE|PENDING|WAITING/i
 const ERROR_STATUS = /ERROR|FAIL/i
 
+/**
+ * A swarm's workers, as errands of the conversation that spawned them: `parent id → [{ id, task,
+ * lastActivityAt }]`, the same shape the Claude Code adapter hands back. Only children the app
+ * says are running count — the colony shows the errands a thread has out *right now*, and a
+ * finished worker should leave the map the way a finished Claude subagent does. A child is named
+ * by its agent name (`crawler-1`), which is what the app shows for it, then its title.
+ */
+function errandsOf(index, now) {
+  const byParent = new Map()
+  for (const [id, row] of index) {
+    if (!row.child || !row.parent || row.killed || !RUNNING_STATUS.test(row.status)) continue
+    if (row.updatedAt && now - row.updatedAt > ACTIVE_WINDOW_MS) continue
+    if (!byParent.has(row.parent)) byParent.set(row.parent, [])
+    byParent.get(row.parent).push({ id, task: row.agent || row.title || 'Sub-agent', lastActivityAt: row.updatedAt || now })
+  }
+  return byParent
+}
+
 async function scanThreads() {
   const now = Date.now()
   const threads = []
@@ -311,6 +331,7 @@ async function scanThreads() {
       workspaces(home.dir),
       summaries(home.dir),
     ])
+    const errands = errandsOf(index, now)
     for (const entry of entries) {
       // The same conversation in both homes would be one bot drawn twice; the first home wins.
       if (seen.has(entry.id)) continue
@@ -319,7 +340,10 @@ async function scanThreads() {
       // A sub-agent's own conversation is an errand of its parent, not a thread of its own.
       if (summary?.child) continue
       const blocked = RUNNING_STATUS.test(summary?.status || '') && (await awaitingApproval(home.dir, entry.id))
-      threads.push(await threadOf(entry, home, where, summary, now, blocked))
+      const thread = await threadOf(entry, home, where, summary, now, blocked)
+      const out = errands.get(entry.id)
+      if (out?.length) thread.subagents = out
+      threads.push(thread)
     }
   }
   return threads

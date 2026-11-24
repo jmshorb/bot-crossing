@@ -197,7 +197,7 @@ const glslFloat = (n) => Number(n).toFixed(4)
  * A material pair for one crowd: the standard material and, if it casts shadows, the depth
  * material that goes with it. `rate` is in Hz; the shader wants radians per second.
  */
-function crowdMaterials(o) {
+export function crowdMaterials(o) {
   const uniforms = {
     uTime: faunaUniforms.uTime,
     uMotion: faunaUniforms.uMotion,
@@ -416,7 +416,7 @@ const ROTOR_SPIN = [1, -1.04, 1.08, -0.96]
  * hexagonal disc and two blades each, skids, a front LED, and a crate on a cable
  * underneath. The crate and cable are `aCrate` so the shader can fold them away.
  */
-function droneGeometry() {
+export function droneGeometry() {
   const parts = []
   const hull = new RoundedBoxGeometry(0.5, 0.2, 0.5, 3, 0.07)
   parts.push(tag(hull))
@@ -487,14 +487,14 @@ function hashString(s) {
   return h >>> 0
 }
 
-function wrapAngle(a) {
+export function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2
   while (a < -Math.PI) a += Math.PI * 2
   return a
 }
 
 /** Build the instanced mesh every crowd shares the shape of. */
-function crowdMesh(geo, mats, count, name, shadow) {
+export function crowdMesh(geo, mats, count, name, shadow) {
   const mesh = new THREE.InstancedMesh(geo, mats.material, count)
   mesh.name = name
   // Bounds are computed from the geometry, not from where the instances have flown to, so
@@ -507,7 +507,7 @@ function crowdMesh(geo, mats, count, name, shadow) {
   return mesh
 }
 
-function phaseAttribute(geo, count, rand) {
+export function phaseAttribute(geo, count, rand) {
   const phase = new Float32Array(count)
   for (let i = 0; i < count; i++) phase[i] = rand() * Math.PI * 2
   geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1))

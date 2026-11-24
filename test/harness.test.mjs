@@ -639,10 +639,11 @@ async function fakeAntigravitySummaries(home, rows) {
   const { DatabaseSync } = await import('node:sqlite')
   const db = new DatabaseSync(path.join(home, 'conversation_summaries.db'))
   db.exec(`CREATE TABLE conversation_summaries (conversation_id text PRIMARY KEY, title text, workspace_uris text,
-    status text, killed numeric, last_modified_time datetime, parent_conversation_id text)`)
-  const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)')
+    status text, killed numeric, last_modified_time datetime, parent_conversation_id text, agent_name text)`)
+  const insert = db.prepare('INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
   for (const r of rows) {
-    insert.run(r.id, r.title ?? '', JSON.stringify(r.workspaces ?? []), r.status ?? '', 0, r.updated ?? '', r.parent ?? '')
+    const uris = JSON.stringify(r.workspaces ?? [])
+    insert.run(r.id, r.title ?? '', uris, r.status ?? '', 0, r.updated ?? '', r.parent ?? '', r.agent ?? '')
   }
   db.close()
 }
@@ -698,6 +699,25 @@ test('an Antigravity app session stopped on an approval wants you, though the in
   const [t] = await h.scanThreads()
   assert.equal(t.running, false)
   assert.equal(t.unread, true)
+  await fsp.rm(home, { recursive: true, force: true })
+})
+
+test("a running Antigravity swarm's workers are errands of the conversation that spawned them", async () => {
+  const home = await fakeAntigravity([{ type: 'USER_INPUT', source: 'USER_EXPLICIT', content: 'crawl in parallel' }])
+  const now = new Date().toISOString().replace('T', ' ')
+  const kid = (n) => `aaaaaaaa-bbbb-4ccc-8ddd-00000000000${n}`
+  await fakeAntigravitySummaries(home, [
+    { id: SESSION_ID, title: 'Crawler Swarm', status: 'CASCADE_RUN_STATUS_RUNNING', updated: now },
+    { id: kid(1), status: 'CASCADE_RUN_STATUS_RUNNING', parent: SESSION_ID, agent: 'crawler-1', updated: now },
+    { id: kid(2), status: 'CASCADE_RUN_STATUS_RUNNING', parent: SESSION_ID, agent: 'crawler-2', updated: now },
+    // Finished: off the map, the way a finished Claude subagent is.
+    { id: kid(3), status: 'CASCADE_RUN_STATUS_IDLE', parent: SESSION_ID, updated: now },
+  ])
+  const h = await antigravityWith(home)
+  const [t] = await h.scanThreads()
+  assert.deepEqual(t.subagents.map((s) => s.id).sort(), [kid(1), kid(2)])
+  assert.deepEqual(t.subagents.map((s) => s.task).sort(), ['crawler-1', 'crawler-2'])
+  assert.ok(t.subagents.every((s) => s.lastActivityAt))
   await fsp.rm(home, { recursive: true, force: true })
 })
 

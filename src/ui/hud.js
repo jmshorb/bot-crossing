@@ -291,6 +291,13 @@ export class Hud {
       ...Object.values(HARNESS_TINTS).map(({ key, label }) => this._color(label, key, 'tintByHarness'))
     )
     view.append(
+      this._toggle(
+        'Sub-agents as drones',
+        'errandDrones',
+        'A sub-agent — a Claude Code subagent, or a worker in an Antigravity swarm — flies as a drone over the thread that sent it, instead of walking the zone as a bot of its own.'
+      )
+    )
+    view.append(
       this._toggle('Follow selected bot', 'followSelected', 'Tracks the selected bot until you deselect. Drag to pan, right-drag to orbit, and scroll to zoom.'),
       this._toggle('Return to isometric', 'autoFrame', 'Eases the angle back when you stop dragging.'),
       this._slider('Field of view', 'fov', 20, 60, 1, (v) => `${v}°`),

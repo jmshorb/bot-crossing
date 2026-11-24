@@ -157,6 +157,8 @@ export const DEFAULTS = {
   hideDormant: true,
   /** Suits tinted by the AI tool the bot works for — orange Claude, blue Antigravity, green Codex. */
   tintByHarness: true,
+  /** Sub-agents (a Claude subagent, an Antigravity swarm worker) as drones over their parent. */
+  errandDrones: true,
   /** The tint per tool, as RGB. Kept as one key each so a change is a plain value compare. */
   tintClaudeCode: 0xe0682a,
   tintAntigravity: 0x3a74e0,

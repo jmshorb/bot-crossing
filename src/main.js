@@ -1282,7 +1282,10 @@ function applyThreads(list) {
     .map((plot) => ({
       name: plot.name,
       accent: plot.accent,
-      count: list.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
+      // A drone is not a thread of the repo's own; it is counted with the bot that sent it.
+      count: list.filter(
+        (t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name && !(t.parentId && settings.get('errandDrones'))
+      ).length,
       urgent: colony.urgentPlots?.has(plot.id) ?? false,
     }))
     .sort((a, b) => b.count - a.count)
@@ -1490,6 +1493,9 @@ settings.onChange((changed, scope) => {
   // rebuilt from the list rather than merely re-rendered.
   if (changed.has('hideDormant')) applyThreads(threads)
   if (changed.has('maxAgents')) applyThreads(threads)
+  if (['errandDrones', 'tintByHarness', 'tintClaudeCode', 'tintAntigravity', 'tintCodex'].some((k) => changed.has(k))) {
+    applyThreads(threads)
+  }
   if (changed.has('finderTags')) syncFinderColors()
 })
 

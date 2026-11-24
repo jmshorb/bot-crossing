@@ -24,7 +24,8 @@ import {
 import { translateCells } from '../world/plot-move.js'
 import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
 import { Ship } from '../world/ship.js'
-import { Astronauts } from '../agents/astronauts.js'
+import { Astronauts, harnessTint } from '../agents/astronauts.js'
+import { ErrandDrones } from '../agents/errand-drones.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
 import { MAX_AGENT_CAP } from '../core/settings.js'
 import { Particles } from '../agents/particles.js'
@@ -172,6 +173,7 @@ export class Colony {
 
     this.ship = new Ship(scene, shipPosition())
     this.astronauts = new Astronauts(scene, settings)
+    this.errandDrones = new ErrandDrones(scene)
     this.astronauts.world = this._world()
     // Sized for the largest preset rather than the current one: unlike the astronaut meshes these
     // buffers are never rebuilt, so allocating against today's `maxAgents` means raising quality
@@ -492,7 +494,13 @@ export class Colony {
    */
   setThreads(threads, archivedIds = new Set(), hiddenProjects = new Set(), knownIds = new Set()) {
     const now = Date.now()
-    const live = liveThreadsForColony(threads, archivedIds, hiddenProjects)
+    const everyone = liveThreadsForColony(threads, archivedIds, hiddenProjects)
+    // Errands fly as drones over their parent rather than standing as bots of their own: kept out
+    // of the zones, buildings and roster here, and handed to `errandDrones` once the parents'
+    // buildings are placed. With the setting off they are ordinary threads, as upstream has them.
+    const asDrones = this.settings.get('errandDrones')
+    const errands = asDrones ? everyone.filter((t) => t.parentId) : []
+    const live = asDrones ? everyone.filter((t) => !t.parentId) : everyone
 
     // Group by repo, biggest project first so the busiest work lands nearest the middle.
     const byProject = new Map()
@@ -606,6 +614,14 @@ export class Colony {
     }
 
     this.threads = new Map(live.map((t) => [t.id, t]))
+    this.errandDrones.setErrands(
+      errands.map((t) => ({
+        id: t.id,
+        parentId: t.parentId,
+        anchor: this.buildings.get(t.parentId)?.mesh.position,
+        color: harnessTint(t.harness, this.settings),
+      }))
+    )
     this.urgentPlots = urgent
     this.activePlots = active
     this._rebuildNavigation()
@@ -1101,6 +1117,7 @@ export class Colony {
     this._growBuildings(dt)
     this.astronauts.update(dt, elapsed)
     this.astronauts.updateRings(elapsed)
+    this.errandDrones.update(dt, this.settings.get('reducedMotion') ? 0.5 : 1)
     this.indicators.update(this.astronauts.agents, elapsed, (a) => this._badgeFor(a))
     this._emit(dt, elapsed)
     this._emitMotes(dt, night)

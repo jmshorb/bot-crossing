@@ -56,6 +56,13 @@ const TINT_AMOUNT = 0.8
 const _tint = new THREE.Color()
 const _tone = new THREE.Color()
 
+/** A tool's tint as RGB, or null when tinting is off or the tool has none. */
+export function harnessTint(harness, settings) {
+  const key = settings.get('tintByHarness') ? HARNESS_TINTS[harness]?.key : undefined
+  const tint = key ? settings.get(key) : undefined
+  return Number.isInteger(tint) ? tint : null
+}
+
 /** A bot's suit: its own shade of white, pulled toward its tool's colour when tinting is on. */
 function suitFor(id, harness, settings) {
   const tone = SUIT_TONES[(hash(id) >>> 3) % SUIT_TONES.length]
