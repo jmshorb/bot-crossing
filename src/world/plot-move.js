@@ -20,11 +20,12 @@ export const HEX_DIRS = [
 export const SHIP_CELL = { q: -2, r: 1 }
 
 /**
- * The lounge's cell: the lander's outer neighbour, so the pool is a hex tile attached to the
- * landing pad on the side away from the colony. Reserved like the ship's — no zone is placed
- * on it, grows into it or can be dragged onto it.
+ * The lounge's cell: the lander's outer neighbour that sits directly to its left in the default
+ * camera view, so the pool is a hex tile attached to the landing pad beside it rather than behind
+ * it. (-3, 1), the other outer neighbour, put it up behind the lander from that view. Reserved
+ * like the ship's — no zone is placed on it, grows into it or can be dragged onto it.
  */
-export const LOUNGE_CELL = { q: -3, r: 1 }
+export const LOUNGE_CELL = { q: -3, r: 2 }
 
 /** Whether a cell key belongs to the ship or the lounge rather than to anybody's zone. */
 export const isReservedCell = (k) => k === cellKey(SHIP_CELL.q, SHIP_CELL.r) || k === cellKey(LOUNGE_CELL.q, LOUNGE_CELL.r)
