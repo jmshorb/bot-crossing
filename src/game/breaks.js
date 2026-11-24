@@ -38,7 +38,7 @@ export function applyBreaks(threads, breaks, now = Date.now()) {
     if (b.until && now >= b.until) {
       return { ...t, onBreak: null, breakOver: { reason: b.reason || '' }, breakUnread: Boolean(t.unread), unread: true }
     }
-    return { ...t, onBreak: { reason: b.reason || '', until: b.until || 0 } }
+    return { ...t, onBreak: { reason: b.reason || '', until: b.until || 0, drink: Number.isInteger(b.drink) ? b.drink : null } }
   })
   return { threads: out, ended }
 }
@@ -47,6 +47,54 @@ function stripBreak(t) {
   if (!t || (!('onBreak' in t) && !('breakOver' in t) && !('breakUnread' in t))) return t
   const { onBreak, breakOver, breakUnread, ...rest } = t
   return breakUnread === undefined ? rest : { ...rest, unread: breakUnread }
+}
+
+/**
+ * A drink for a new break: a random bright colour, kept clear of the drinks already out on other
+ * breaks the way zone colours keep clear of each other — so two bots sitting side by side never
+ * hold the same one while there is any other choice. Hue is what tells drinks apart at a glance,
+ * so the spacing is measured round the colour wheel; saturation and lightness stay high so every
+ * one of them reads as a cocktail rather than a cup of tea.
+ */
+export function pickDrinkColor(taken = [], rand = Math.random) {
+  const hues = taken.filter(Number.isInteger).map(hueOf).sort((a, b) => a - b)
+  let hue = rand() * 360
+  if (hues.length) {
+    // The widest stretch of the wheel nobody's drink is in, and somewhere near its middle —
+    // random within the middle fifth, so it is not predictable but never crowds a neighbour.
+    // Random tries were the first version, and with five drinks out they could land two
+    // within a few degrees of each other.
+    let from = hues[hues.length - 1]
+    let span = hues[0] + 360 - from
+    for (let i = 1; i < hues.length; i++) {
+      if (hues[i] - hues[i - 1] > span) {
+        from = hues[i - 1]
+        span = hues[i] - hues[i - 1]
+      }
+    }
+    hue = (from + span * (0.4 + rand() * 0.2)) % 360
+  }
+  return hslToRgb(hue, 0.85 + rand() * 0.15, 0.55 + rand() * 0.08)
+}
+
+function hueOf(rgb) {
+  const r = ((rgb >> 16) & 255) / 255
+  const g = ((rgb >> 8) & 255) / 255
+  const b = (rgb & 255) / 255
+  const max = Math.max(r, g, b)
+  const d = max - Math.min(r, g, b)
+  if (!d) return 0
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return (h * 60 + 360) % 360
+}
+
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = l - c / 2
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x]
+  const to = (v) => Math.round((v + m) * 255)
+  return (to(r) << 16) | (to(g) << 8) | to(b)
 }
 
 /** What the card says about a thread's break, or '' for a thread not on one. */

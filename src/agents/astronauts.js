@@ -1614,7 +1614,10 @@ export class Astronauts {
         }
         // A drink, once a bot on a break has sat down.
         if (agent.status === 'break' && agent.clipKey === 'sit') {
-          props.writeDrink(agent.pos, agent.yaw, agent.clipTime, DRINK_COLORS[hash(agent.id) % DRINK_COLORS.length], agent.suit)
+          // The colour poured when the break began; a break saved before drinks were random
+          // falls back to a flavour picked off the bot's id.
+          const drink = agent.thread?.onBreak?.drink ?? DRINK_COLORS[hash(agent.id) % DRINK_COLORS.length]
+          props.writeDrink(agent.pos, agent.yaw, agent.clipTime, drink, agent.suit)
         }
         // And whatever a checking astronaut has got out, in its left hand.
         if (agent.checkStart >= 0 && agent.clipKey.startsWith('phone') && elapsed - agent.checkStart < CHECK_LEN) {

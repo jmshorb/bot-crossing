@@ -99,6 +99,7 @@ const asBreaks = (v) =>
           reason: typeof b.reason === 'string' ? b.reason.trim().slice(0, 120) : '',
           until: Number(b.until) > 0 ? Number(b.until) : 0,
           since: Number(b.since),
+          ...(Number.isInteger(b.drink) && b.drink >= 0 && b.drink <= 0xffffff ? { drink: b.drink } : {}),
         },
       ]),
   )

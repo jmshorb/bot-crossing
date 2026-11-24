@@ -26,7 +26,7 @@ import {
   setFinderColor,
 } from './game/api.js'
 import { FINDER_SWATCHES, nearestFinderColor, reconcileZoneColor } from './game/zone-colors.js'
-import { applyBreaks } from './game/breaks.js'
+import { applyBreaks, pickDrinkColor } from './game/breaks.js'
 import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 import { withErrands } from './game/errands.js'
 import { ACTIVE, JumpRun, NEEDS_YOU, busiestOrder, crewOrder, inScope, needsYouOrder, nextInRing } from './game/jumps.js'
@@ -338,7 +338,12 @@ const actions = {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
     const clean = String(reason || '').trim().slice(0, 120)
-    state.breaks = { ...(state.breaks || {}), [thread.id]: { reason: clean, until: until > Date.now() ? until : 0, since: Date.now() } }
+    // A drink of its own, poured now and kept for the whole break, unlike the ones already out.
+    const drink = pickDrinkColor(Object.values(state.breaks || {}).map((b) => b.drink))
+    state.breaks = {
+      ...(state.breaks || {}),
+      [thread.id]: { reason: clean, until: until > Date.now() ? until : 0, since: Date.now(), drink },
+    }
     queueSave()
     applyThreads(threads)
     hud.toast(clean ? `Off for a break — dreaming about ${clean.slice(0, 40)}` : 'Off for a break')
